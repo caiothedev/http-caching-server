@@ -17,6 +17,7 @@ jobs:
   build-test:
     name: ${{ matrix.compiler }} / ${{ matrix.build_type }}${{ matrix.sanitizers == 'ON' && ' + ASan/UBSan' || '' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -44,7 +45,7 @@ jobs:
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |

@@ -52,7 +52,8 @@ python3 -m http.server "$ORIGIN_PORT" --bind 127.0.0.1 --directory "$WORK_DIR/ww
 PIDS+=($!)
 
 "$PROXY_BIN" --port "$PROXY_PORT" --threads 2 --log-level debug > "$WORK_DIR/proxy.log" 2>&1 &
-PIDS+=($!)
+PROXY_PID=$!
+PIDS+=("$PROXY_PID")
 
 wait_for_port "$ORIGIN/index.html" || fail "origin did not start"
 wait_for_port "$PROXY/__proxy/stats" || fail "proxy did not start"
@@ -80,5 +81,16 @@ code="$(pcurl -o /dev/null -w '%{http_connect}' -p "$ORIGIN/" 2>/dev/null || tru
 echo "5. upstream connection refused -> 502"
 code="$(pcurl -o /dev/null -w '%{http_code}' "http://127.0.0.1:1/" || true)"
 [[ "$code" == "502" ]] || fail "expected 502 for unreachable origin, got $code"
+
+# Sanitizer reports (leaks, UBSan "runtime error") only surface in the proxy's
+# own output and exit status, so stop it gracefully and check both.
+echo "6. graceful shutdown on SIGTERM, no sanitizer reports"
+kill -TERM "$PROXY_PID"
+status=0
+wait "$PROXY_PID" || status=$?
+[[ "$status" -eq 0 ]] || fail "proxy exited with status $status after SIGTERM"
+if grep -Eq 'ERROR: (Address|Leak)Sanitizer|runtime error:' "$WORK_DIR/proxy.log"; then
+    fail "sanitizer reported errors"
+fi
 
 echo "smoke test passed"
