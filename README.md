@@ -45,6 +45,7 @@ Build and run the tests:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
+scripts/smoke_test.sh build/http_proxy   # end-to-end test
 ```
 
 AddressSanitizer/UBSan build (recommended while developing):
@@ -93,6 +94,14 @@ tests/                    # Catch2 tests for parser, URL, dates, LRU and cache p
 Request flow: `Session` reads and parses → looks up `HttpCache` → *hit*: answer directly; *stale*: send a conditional request; *miss*: `UpstreamExchange` connects to the origin → the response is stored if policy allows → re-framed with `Content-Length` and sent to the client.
 
 `HttpCache` is shared across threads behind a mutex. All other state belongs to a single session, whose handlers run serialized on its strand.
+
+## Documentation
+
+- [How to build, run and test](docs/README.md): prerequisites, CMake and CLI options, usage examples, error codes and troubleshooting
+- [Architecture](docs/ARCHITECTURE.en.md): layers, concurrency model, request lifecycle, parser, caching policy and timeouts
+- [Contributing](CONTRIBUTING.md): code standards, tests, commits and pull requests
+
+[CI](.github/workflows/ci.yml) builds with GCC and Clang (Release, and Debug with ASan/UBSan), then runs the unit tests and the smoke test on every push to `main` and every pull request.
 
 by caiothedev<br />
 #http #c++ #proxy

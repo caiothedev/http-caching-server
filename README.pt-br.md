@@ -45,6 +45,7 @@ Compilar e rodar os testes:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
+scripts/smoke_test.sh build/http_proxy   # teste ponta a ponta
 ```
 
 Build com AddressSanitizer/UBSan (recomendado durante o desenvolvimento):
@@ -93,6 +94,14 @@ tests/                    # testes Catch2 do parser, URL, datas, LRU e política
 Fluxo de uma requisição: `Session` lê e faz o parse → consulta o `HttpCache` → *hit*: responde direto; *stale*: envia uma requisição condicional; *miss*: `UpstreamExchange` conecta na origem → a resposta é armazenada se a política permitir → é reenquadrada com `Content-Length` e enviada ao cliente.
 
 O `HttpCache` é compartilhado entre threads e protegido por mutex. Todo o resto do estado pertence a uma única sessão, cujos handlers rodam serializados no strand dela.
+
+## Documentação
+
+- [Como compilar, rodar e testar](docs/README.pt-br.md): pré-requisitos, opções do CMake e da CLI, exemplos de uso, códigos de erro e solução de problemas
+- [Arquitetura](docs/ARCHITECTURE.pt-br.md): camadas, modelo de concorrência, ciclo de vida de uma requisição, parser, política de cache e timeouts
+- [Como contribuir](CONTRIBUTING.pt-br.md): padrões de código, testes, commits e pull requests
+
+O [CI](.github/workflows/ci.yml) compila com GCC e Clang (Release e Debug com ASan/UBSan), roda os testes unitários e o smoke test em todo push na `main` e em todo pull request.
 
 by caiothedev<br />
 #http #c++ #proxy
