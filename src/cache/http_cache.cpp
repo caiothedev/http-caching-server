@@ -16,11 +16,18 @@ namespace proxy::cache {
         // heuristic freshness when no explicit expiration is given.
         bool heuristically_cacheable(int status) {
             switch (status) {
-                case 200: case 203: case 204: case 300: case 301: case 308:
-                case 404: case 405: case 410: case 414: case 501:
-                    return true;
-                default:
-                    return false;
+                case 200:
+                case 203:
+                case 204:
+                case 300:
+                case 301:
+                case 308:
+                case 404:
+                case 405:
+                case 410:
+                case 414:
+                case 501: return true;
+                default: return false;
             }
         }
 
@@ -78,8 +85,8 @@ namespace proxy::cache {
         // Conservative choice: personalised responses are not shared unless marked public.
         if (resp.headers.contains("Set-Cookie") && !resp_cc.is_public) return false;
 
-        bool explicit_freshness = resp_cc.max_age || resp_cc.s_maxage ||
-                                resp.headers.contains("Expires") || resp_cc.is_public;
+        bool explicit_freshness =
+        resp_cc.max_age || resp_cc.s_maxage || resp.headers.contains("Expires") || resp_cc.is_public;
         if (explicit_freshness) return true;
 
         // Without explicit freshness we need a cacheable-by-default status and a
@@ -157,8 +164,7 @@ namespace proxy::cache {
         return entry;
     }
 
-    LookupResult HttpCache::lookup(const std::string& key, const http::Request& req,
-                                Clock::time_point now) {
+    LookupResult HttpCache::lookup(const std::string& key, const http::Request& req, Clock::time_point now) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto found = lru_.get(key);
         if (!found) {
@@ -216,8 +222,11 @@ namespace proxy::cache {
 
         // RFC 9111 §3.2: header fields in the 304 replace the stored ones, except
         // framing fields that describe the (absent) 304 body.
-        static const std::set<std::string> kSkip = {"content-length", "transfer-encoding",
-                                                    "content-encoding", "content-range"};
+        static const std::set<std::string> kSkip = {
+            "content-length", "transfer-encoding",
+            "content-encoding",
+            "content-range"
+        };
         http::Headers update = not_modified.headers;
         http::remove_hop_by_hop(update);
         std::set<std::string> replaced;

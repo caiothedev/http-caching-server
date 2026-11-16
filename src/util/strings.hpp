@@ -69,11 +69,22 @@ inline bool parse_uint(std::string_view s, std::uint64_t& out) noexcept {
 inline bool is_tchar(char c) noexcept {
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return true;
     switch (c) {
-        case '!': case '#': case '$': case '%': case '&': case '\'': case '*':
-        case '+': case '-': case '.': case '^': case '_': case '`': case '|': case '~':
-            return true;
-        default:
-            return false;
+        case '!':
+        case '#':
+        case '$':
+        case '%':
+        case '&':
+        case '\'':
+        case '*':
+        case '+':
+        case '-':
+        case '.':
+        case '^':
+        case '_':
+        case '`':
+        case '|':
+        case '~': return true;
+        default: return false;
     }
 }
 

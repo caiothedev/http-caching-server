@@ -36,9 +36,9 @@ namespace proxy::cache {
     using EntryPtr = std::shared_ptr<const CacheEntry>;
 
     enum class LookupStatus {
-        Miss,        // nothing usable stored
-        Fresh,       // can be served without contacting the origin
-        NeedsValidation,  // stored but stale (or no-cache): revalidate first
+        Miss,               // nothing usable stored
+        Fresh,              // can be served without contacting the origin
+        NeedsValidation,    // stored but stale (or no-cache): revalidate first
     };
 
     struct LookupResult {

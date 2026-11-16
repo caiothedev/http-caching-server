@@ -152,8 +152,15 @@ namespace proxy::http {
     void remove_hop_by_hop(Headers& headers) {
         for (const auto& name : headers.get_tokens("Connection")) headers.remove(name);
         static constexpr std::string_view kHopByHop[] = {
-            "Connection", "Keep-Alive", "Proxy-Connection", "Proxy-Authenticate",
-            "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade",
+            "Connection",
+            "Keep-Alive",
+            "Proxy-Connection",
+            "Proxy-Authenticate",
+            "Proxy-Authorization",
+            "TE",
+            "Trailer",
+            "Transfer-Encoding",
+            "Upgrade",
         };
         for (auto name : kHopByHop) headers.remove(name);
     }

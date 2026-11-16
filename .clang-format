@@ -1,0 +1,19 @@
+# Code style for the project. Run: clang-format -i src/**/*.{hpp,cpp} tests/*.cpp
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++17
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 110
+AccessModifierOffset: -4
+IndentCaseLabels: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+DerivePointerAlignment: false
+PointerAlignment: Left
+SpacesBeforeTrailingComments: 2
+IncludeBlocks: Preserve
+SortIncludes: CaseSensitive
