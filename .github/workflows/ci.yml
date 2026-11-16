@@ -70,4 +70,4 @@ jobs:
         run: ctest --test-dir build --output-on-failure --parallel 4
 
       - name: Smoke test
-        run: scripts/smoke_test.sh build/http_proxy
+        run: bash scripts/smoke_test.sh build/http_proxy
