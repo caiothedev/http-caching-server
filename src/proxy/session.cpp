@@ -184,17 +184,25 @@ namespace proxy {
 
         cache_key_ = url_->to_string();
         cache::EntryPtr stale;
+        const auto request_cc = cache::parse_cache_control(req.headers.get_combined("Cache-Control"));
+        const bool cache_lookup_eligible = req.method == "GET" && !cache::is_conditional(req);
 
-        if (ctx_->config.cache_enabled && req.method == "GET" && !cache::is_conditional(req)) {
+        // only-if-cached is an origin-access prohibition, not merely a cache
+        // lookup hint. Enforce it before any path that can forward upstream.
+        if (request_cc.only_if_cached && (!ctx_->config.cache_enabled || !cache_lookup_eligible)) {
+            current_ = std::move(req);
+            return send_error(504, "resource not available in cache (only-if-cached)");
+        }
+
+        if (ctx_->config.cache_enabled && cache_lookup_eligible) {
             auto result = ctx_->cache.lookup(cache_key_, req, cache::Clock::now());
             if (result.status == cache::LookupStatus::Fresh) {
                 current_ = std::move(req);
                 return serve_entry(result.entry, "HIT");
             }
-            auto cc = cache::parse_cache_control(req.headers.get_combined("Cache-Control"));
-            if (cc.only_if_cached) {
+            if (request_cc.only_if_cached) {
                 current_ = std::move(req);
-                return send_error(504, "resource not in cache (only-if-cached)");
+                return send_error(504, "resource not available in cache (only-if-cached)");
             }
             if (result.status == cache::LookupStatus::NeedsValidation) stale = result.entry;
         }
