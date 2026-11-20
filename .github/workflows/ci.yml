@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'test/**']
   pull_request:
   workflow_dispatch:
 
@@ -50,11 +50,16 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build libboost-dev
+          sudo apt-get install -y --no-install-recommends cmake ninja-build libboost-dev clang-format
           # clang needs compiler-rt for -fsanitize=address,undefined
           if [ "${{ matrix.compiler }}" = "clang" ]; then
             sudo apt-get install -y --no-install-recommends clang libclang-rt-dev
           fi
+
+      - name: Check C++ formatting
+        run: |
+          find src tests -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
+            | xargs -0 -r clang-format --dry-run --Werror
 
       - name: Configure
         run: >
@@ -71,3 +76,6 @@ jobs:
 
       - name: Smoke test
         run: bash scripts/smoke_test.sh build/http_proxy
+
+      - name: Integration test
+        run: bash scripts/integration_test.sh build/http_proxy

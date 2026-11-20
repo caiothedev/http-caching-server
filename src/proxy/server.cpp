@@ -50,7 +50,7 @@ namespace proxy {
 
     void Server::do_accept() {
         // Protect accept initiation against a concurrent stop() closing the acceptor.
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> accept_lock(mutex_);
         if (stopping_) return;
 
         // Each connection gets its own strand: all handlers of one session run

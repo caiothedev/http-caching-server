@@ -109,4 +109,4 @@ Request flow: `Session` reads and parses → looks up `HttpCache` → *hit*: ans
 [CI](.github/workflows/ci.yml) builds with GCC and Clang (Release, and Debug with ASan/UBSan), then runs the unit tests and the smoke test on every push to `main` and every pull request.
 
 by caiothedev<br />
-#http #c++ #proxy
+#http #server #c++ #proxy #cache

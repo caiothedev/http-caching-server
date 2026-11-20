@@ -109,4 +109,4 @@ O `HttpCache` é compartilhado entre threads e protegido por mutex. Todo o resto
 O [CI](.github/workflows/ci.yml) compila com GCC e Clang (Release e Debug com ASan/UBSan), roda os testes unitários e o smoke test em todo push na `main` e em todo pull request.
 
 by caiothedev<br />
-#http #c++ #proxy
+#http #server #c++ #proxy #cache

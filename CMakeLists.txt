@@ -70,6 +70,7 @@ if(PROXY_BUILD_TESTS)
         tests/test_date.cpp
         tests/test_cache_control.cpp
         tests/test_http_cache.cpp
+        tests/test_config.cpp
     )
     target_link_libraries(proxy_tests PRIVATE proxy_core Catch2::Catch2WithMain)
 
