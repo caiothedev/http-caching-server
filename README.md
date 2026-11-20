@@ -33,7 +33,7 @@ An HTTP proxy server with a caching system, developed in C++ as a study project,
   - `X-Cache: HIT | MISS | REVALIDATED` response header
 - Client keep-alive, `Expect: 100-continue`, hop-by-hop header removal, `Via`, loop detection
 - Bounded simultaneous client connections (including CONNECT tunnels) and per-message body size, with a 128 MiB aggregate in-flight body budget
-- Upstream, idle-client and tunnel timeouts
+- Separate absolute-duration and inactivity deadlines for upstream exchanges, plus idle-client and tunnel timeouts
 - Graceful SIGINT/SIGTERM shutdown: stop accepting new clients, finish in-flight HTTP responses, and close active CONNECT tunnels
 - Statistics endpoint: `GET /__proxy/stats` (JSON)
 

@@ -233,3 +233,7 @@ Possible next steps: streaming of large responses, connection pooling, on-disk c
 
 by caiothedev<br />
 #architecture
+
+## Upstream deadlines
+
+Each upstream exchange is protected by two independent deadlines configured by `--timeout`: an absolute deadline that starts before DNS resolution and is never extended, and an inactivity deadline that is refreshed only when a phase completes or response bytes arrive. Receiving small pieces continuously cannot keep an exchange alive beyond the absolute deadline.

@@ -45,11 +45,13 @@ namespace proxy {
         void do_read();
         void on_read(const boost::system::error_code& ec, std::size_t n);
         void fail(const std::string& what, const boost::system::error_code& ec);
+        void on_timeout(const char* reason);
         void finish(UpstreamResult result);
 
         boost::asio::ip::tcp::resolver resolver_;
         boost::asio::ip::tcp::socket socket_;
-        Deadline deadline_;
+        Deadline total_deadline_;
+        Deadline idle_deadline_;
         std::string host_;
         std::uint16_t port_;
         std::string request_bytes_;
