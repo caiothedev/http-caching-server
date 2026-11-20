@@ -243,7 +243,6 @@ namespace proxy::http {
                     complete();
                     return;
                 }
-                body_.reserve(static_cast<std::size_t>(spec.length));
                 remaining_ = spec.length;
                 state_ = State::FixedBody;
                 return;

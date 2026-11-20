@@ -44,10 +44,11 @@ namespace proxy {
         auto ep = client_.remote_endpoint(ec);
         peer_ = ec ? "?" : ep.address().to_string() + ":" + std::to_string(ep.port());
         ctx_->stats.connections++;
-        ctx_->stats.active_connections++;
     }
 
-    Session::~Session() { ctx_->stats.active_connections--; }
+    Session::~Session() {
+        if (!connection_slot_transferred_) ctx_->stats.active_connections--;
+    }
 
     void Session::start() {
         LOG_DEBUG("[" << id_ << "] connection from " << peer_);
@@ -72,9 +73,7 @@ namespace proxy {
         });
     }
 
-    // ---------------------------------------------------------------------------
     // Reading and parsing
-    // ---------------------------------------------------------------------------
 
     void Session::do_read() {
         if (closed_) return;
@@ -144,9 +143,7 @@ namespace proxy {
         do_read();
     }
 
-    // ---------------------------------------------------------------------------
     // Request dispatch
-    // ---------------------------------------------------------------------------
 
     void Session::handle_request(http::Request req) {
         ctx_->stats.requests++;
@@ -184,17 +181,25 @@ namespace proxy {
 
         cache_key_ = url_->to_string();
         cache::EntryPtr stale;
+        const auto request_cc = cache::parse_cache_control(req.headers.get_combined("Cache-Control"));
+        const bool cache_lookup_eligible = req.method == "GET" && !cache::is_conditional(req);
 
-        if (ctx_->config.cache_enabled && req.method == "GET" && !cache::is_conditional(req)) {
+        // only-if-cached is an origin-access prohibition, not merely a cache
+        // lookup hint. Enforce it before any path that can forward upstream.
+        if (request_cc.only_if_cached && (!ctx_->config.cache_enabled || !cache_lookup_eligible)) {
+            current_ = std::move(req);
+            return send_error(504, "resource not available in cache (only-if-cached)");
+        }
+
+        if (ctx_->config.cache_enabled && cache_lookup_eligible) {
             auto result = ctx_->cache.lookup(cache_key_, req, cache::Clock::now());
             if (result.status == cache::LookupStatus::Fresh) {
                 current_ = std::move(req);
                 return serve_entry(result.entry, "HIT");
             }
-            auto cc = cache::parse_cache_control(req.headers.get_combined("Cache-Control"));
-            if (cc.only_if_cached) {
+            if (request_cc.only_if_cached) {
                 current_ = std::move(req);
-                return send_error(504, "resource not in cache (only-if-cached)");
+                return send_error(504, "resource not available in cache (only-if-cached)");
             }
             if (result.status == cache::LookupStatus::NeedsValidation) stale = result.entry;
         }
@@ -213,6 +218,7 @@ namespace proxy {
         json << "{\n"
             << "  \"connections\": " << s.connections.load() << ",\n"
             << "  \"active_connections\": " << s.active_connections.load() << ",\n"
+            << "  \"active_tunnels\": " << s.active_tunnels.load() << ",\n"
             << "  \"requests\": " << s.requests.load() << ",\n"
             << "  \"tunnels\": " << s.tunnels.load() << ",\n"
             << "  \"upstream_errors\": " << s.upstream_errors.load() << ",\n"
@@ -238,9 +244,7 @@ namespace proxy {
         send_response(std::move(resp));
     }
 
-    // ---------------------------------------------------------------------------
     // Forwarding and caching
-    // ---------------------------------------------------------------------------
 
     void Session::forward(http::Request req, cache::EntryPtr stale) {
         http::Request up;
@@ -331,9 +335,7 @@ namespace proxy {
         send_response(std::move(resp), cache_status);
     }
 
-    // ---------------------------------------------------------------------------
     // Writing responses
-    // ---------------------------------------------------------------------------
 
     void Session::send_response(http::Response resp, std::string_view cache_status) {
         if (closed_) return;
@@ -391,9 +393,7 @@ namespace proxy {
         process();  // there may already be a pipelined request in `pending_`
     }
 
-    // ---------------------------------------------------------------------------
     // CONNECT tunnelling
-    // ---------------------------------------------------------------------------
 
     void Session::handle_connect(const http::Request& req) {
         keep_alive_ = false;
@@ -446,9 +446,15 @@ namespace proxy {
         // From here on the Tunnel owns both sockets; this session is finished.
         closed_ = true;
         deadline_.stop();
+        connection_slot_transferred_ = true;
         ctx_->stats.tunnels++;
+        ctx_->stats.active_tunnels++;
+        auto ctx = ctx_;
         auto tunnel = std::make_shared<Tunnel>(std::move(client_), std::move(*tunnel_socket_),
-                                            ctx_->config.tunnel_idle_timeout, id_);
+                                            ctx_->config.tunnel_idle_timeout, id_, [ctx] {
+                                                ctx->stats.active_tunnels--;
+                                                ctx->stats.active_connections--;
+                                            });
         if (tunnel_handler_) tunnel_handler_(tunnel);
         tunnel->start(std::move(pending_));
     }

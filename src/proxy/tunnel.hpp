@@ -3,6 +3,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -18,7 +19,7 @@ namespace proxy {
     class Tunnel : public std::enable_shared_from_this<Tunnel> {
     public:
         Tunnel(boost::asio::ip::tcp::socket client, boost::asio::ip::tcp::socket server,
-            std::chrono::seconds idle_timeout, std::uint64_t id);
+            std::chrono::seconds idle_timeout, std::uint64_t id, std::function<void()> on_close);
 
         // `client_pending` holds bytes the client sent right after the CONNECT
         // request (already read from the socket); they are forwarded first.
@@ -47,6 +48,7 @@ namespace proxy {
         Direction upstream_;    // client -> server
         Direction downstream_;  // server -> client
         std::string pending_;
+        std::function<void()> on_close_;
         bool closed_ = false;
     };
 

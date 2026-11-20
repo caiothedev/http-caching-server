@@ -42,11 +42,11 @@ After the tunnel is established, the proxy relays bytes and does not inspect or 
 
 ## Parser and resource limits
 
-The HTTP parser enforces limits on header size, header count, and message body size. The defaults are 64 KiB for the start line plus headers, 100 header fields, and 64 MiB for bodies. The effective body limit is raised when necessary to accommodate the configured maximum cache object size.
+The HTTP parser enforces limits on header size, header count, and message body size. The defaults are 64 KiB for the start line plus headers, 100 header fields, and 8 MiB for request/response bodies. The default connection limit is 16 simultaneous clients, including CONNECT tunnels. The configured product of `--max-connections` and `--max-body` cannot exceed 128 MiB. Fixed `Content-Length` values are checked without reserving the full declared body before bytes arrive.
 
 The parser rejects ambiguous `Transfer-Encoding` plus `Content-Length` framing, malformed framing, unsupported transfer codings, and unsupported protocol upgrades. Only the `chunked` transfer coding is implemented. These checks reduce parsing ambiguity but are not a substitute for network isolation or a security review.
 
-The cache has a configurable total capacity and maximum object size. These are memory bounds for cache storage, not a complete process-wide memory limit: active connections and in-flight request/response bodies also consume memory.
+The cache has a configurable total capacity and maximum object size. The connection and body limits bound concurrent in-flight message-body storage separately from cache storage. This is not a strict process RSS limit: response serialization, socket buffers, allocator capacity, protocol state, and cache metadata also consume memory.
 
 ## Deployment checklist
 

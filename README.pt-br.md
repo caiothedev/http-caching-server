@@ -32,7 +32,8 @@ Um servidor proxy HTTP com sistema de cache desenvolvido em C++ como projeto de 
   - Suporte a `Vary`; invalidação após POST/PUT/DELETE bem-sucedidos
   - Header `X-Cache: HIT | MISS | REVALIDATED` nas respostas
 - Keep-alive com o cliente, `Expect: 100-continue`, remoção de headers *hop-by-hop*, `Via`, detecção de loop
-- Timeouts de upstream, de cliente ocioso e de túnel
+- Limites de conexões simultâneas de clientes (incluindo túneis CONNECT) e de tamanho por corpo, com orçamento agregado de 128 MiB para corpos em trânsito
+- Prazos separados de duração total e de inatividade para trocas com a origem, além de timeouts de cliente ocioso e de túnel
 - Encerramento gracioso via SIGINT/SIGTERM: interromper o aceite de novos clientes, concluir respostas HTTP em andamento e fechar túneis CONNECT ativos
 - Endpoint de estatísticas: `GET /__proxy/stats` (JSON)
 

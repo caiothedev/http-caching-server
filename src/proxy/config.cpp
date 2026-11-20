@@ -27,8 +27,10 @@ namespace proxy {
         << "  -t, --threads N          worker threads (default: number of CPUs)\n"
         << "      --cache-size MB      total cache size in MiB (default 64)\n"
         << "      --max-object MB      largest cacheable response in MiB (default 8)\n"
+        << "      --max-connections N  maximum simultaneous clients (default 16)\n"
+        << "      --max-body MB       maximum request/response body in MiB (default 8)\n"
         << "      --no-cache           disable the cache (pure forwarding proxy)\n"
-        << "      --timeout SEC        upstream connect/read timeout (default 30)\n"
+        << "      --timeout SEC        upstream total and inactivity timeout (default 30)\n"
         << "      --idle-timeout SEC   idle keep-alive client timeout (default 60)\n"
         << "      --tunnel-timeout SEC idle CONNECT tunnel timeout (default 300)\n"
         << "      --connect-ports LIST comma separated ports allowed for CONNECT,\n"
@@ -80,6 +82,12 @@ namespace proxy {
             } else if (arg == "-t" || arg == "--threads") {
                 if (!next() || !parse_number(value, 1, 1024, n)) return error("invalid --threads");
                 cfg.threads = static_cast<unsigned>(n);
+            } else if (arg == "--max-connections") {
+                if (!next() || !parse_number(value, 1, 1024, n)) return error("invalid --max-connections");
+                cfg.max_connections = static_cast<std::size_t>(n);
+            } else if (arg == "--max-body") {
+                if (!next() || !parse_number(value, 1, 128, n)) return error("invalid --max-body");
+                cfg.limits.max_body_bytes = static_cast<std::size_t>(n) * 1024 * 1024;
             } else if (arg == "--cache-size") {
                 if (!next() || !parse_number(value, 1, 1024 * 1024, n)) return error("invalid --cache-size");
                 cfg.cache.max_bytes = static_cast<std::size_t>(n) * 1024 * 1024;
@@ -117,11 +125,16 @@ namespace proxy {
             }
         }
 
-        // The cache keeps the body plus headers in memory, so the body limit for a
-        // single message must allow at least the largest cacheable object.
+        // Cache entries cannot exceed either the cache capacity or parser body limit.
         if (cfg.cache.max_entry_bytes > cfg.cache.max_bytes) cfg.cache.max_entry_bytes = cfg.cache.max_bytes;
-        if (cfg.limits.max_body_bytes < cfg.cache.max_entry_bytes) {
-            cfg.limits.max_body_bytes = cfg.cache.max_entry_bytes;
+        if (cfg.cache.max_entry_bytes > cfg.limits.max_body_bytes) {
+            cfg.cache.max_entry_bytes = cfg.limits.max_body_bytes;
+        }
+
+        // Bound aggregate message-body storage across all admitted client sessions.
+        constexpr std::size_t kMaxInFlightBodyBytes = 128 * 1024 * 1024;
+        if (cfg.max_connections > kMaxInFlightBodyBytes / cfg.limits.max_body_bytes) {
+            return error("--max-connections multiplied by --max-body cannot exceed 128 MiB");
         }
 
         outcome.config = cfg;

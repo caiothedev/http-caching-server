@@ -10,12 +10,14 @@ namespace proxy {
     namespace asio = boost::asio;
     using tcp = asio::ip::tcp;
 
-    Tunnel::Tunnel(tcp::socket client, tcp::socket server, std::chrono::seconds idle_timeout, std::uint64_t id)
+    Tunnel::Tunnel(tcp::socket client, tcp::socket server, std::chrono::seconds idle_timeout, std::uint64_t id,
+                   std::function<void()> on_close)
         : client_(std::move(client)),
         server_(std::move(server)),
         deadline_(client_.get_executor()),
         idle_timeout_(idle_timeout),
-        id_(id) {
+        id_(id),
+        on_close_(std::move(on_close)) {
         upstream_.from = &client_;
         upstream_.to = &server_;
         downstream_.from = &server_;
@@ -94,6 +96,8 @@ namespace proxy {
         server_.close(ignored);
         LOG_INFO("[" << id_ << "] tunnel closed (" << upstream_.bytes << " bytes up, " << downstream_.bytes
                     << " bytes down)");
+        auto on_close = std::move(on_close_);
+        if (on_close) on_close();
     }
 
 }  // namespace proxy

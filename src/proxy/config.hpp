@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -16,6 +17,7 @@ namespace proxy {
         std::string listen_address = "127.0.0.1";
         std::uint16_t port = 8080;
         unsigned threads = 0;  // 0 = hardware concurrency
+        std::size_t max_connections = 16;
 
         std::chrono::seconds upstream_timeout{30};
         std::chrono::seconds client_idle_timeout{60};

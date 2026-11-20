@@ -2,17 +2,20 @@
 # Integration tests for 304 revalidation, unsafe-method invalidation, Vary,
 # Expect: 100-continue, client keep-alive, and CONNECT tunnelling.
 set -euo pipefail
-PROXY_BIN="\${1:-./build/http_proxy}"
-PROXY_PORT="\${PROXY_PORT:-18180}"
-ORIGIN_PORT="\${ORIGIN_PORT:-18181}"
-ECHO_PORT="\${ECHO_PORT:-18443}"
-PROXY="http://127.0.0.1:\${PROXY_PORT}"
-ORIGIN="http://127.0.0.1:\${ORIGIN_PORT}"
+PROXY_BIN="${1:-./build/http_proxy}"
+PROXY_PORT="${PROXY_PORT:-18180}"
+ORIGIN_PORT="${ORIGIN_PORT:-18181}"
+ECHO_PORT="${ECHO_PORT:-18443}"
+NOCACHE_PROXY_PORT="${NOCACHE_PROXY_PORT:-18182}"
+PROXY="http://127.0.0.1:${PROXY_PORT}"
+ORIGIN="http://127.0.0.1:${ORIGIN_PORT}"
 WORK_DIR="$(mktemp -d)"
 SERVER_PID=""
 PROXY_PID=""
+NOCACHE_PROXY_PID=""
 cleanup() {
     [[ -z "$PROXY_PID" ]] || kill "$PROXY_PID" 2>/dev/null || true
+    [[ -z "$NOCACHE_PROXY_PID" ]] || kill "$NOCACHE_PROXY_PID" 2>/dev/null || true
     [[ -z "$SERVER_PID" ]] || kill "$SERVER_PID" 2>/dev/null || true
     wait 2>/dev/null || true
     rm -rf "$WORK_DIR"
@@ -33,6 +36,7 @@ import http.server
 import socketserver
 import sys
 import threading
+import time
 
 origin_port, echo_port = map(int, sys.argv[1:3])
 state = {"resource": 1}
@@ -62,6 +66,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/vary":
             language = self.headers.get("Accept-Language", "")
             self.send_body(200, language.encode(), [("Cache-Control", "max-age=600"), ("Vary", "Accept-Language")])
+        elif self.path == "/slow-drip":
+            self.send_response(200)
+            self.send_header("Date", self.date_time_string())
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "8")
+            self.end_headers()
+            try:
+                for byte in b"12345678":
+                    self.wfile.write(bytes([byte]))
+                    self.wfile.flush()
+                    time.sleep(0.5)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         else:
             self.send_body(404, b"not found")
     def do_POST(self):
@@ -95,7 +112,7 @@ PY
 
 python3 "$WORK_DIR/server.py" "$ORIGIN_PORT" "$ECHO_PORT" > "$WORK_DIR/origin.log" 2>&1 &
 SERVER_PID=$!
-"$PROXY_BIN" --listen 127.0.0.1 --port "$PROXY_PORT" --threads 2 --timeout 3 \
+"$PROXY_BIN" --listen 127.0.0.1 --port "$PROXY_PORT" --threads 2 --timeout 3 --max-connections 2 \
     --connect-ports "$ECHO_PORT" --log-level debug > "$WORK_DIR/proxy.log" 2>&1 &
 PROXY_PID=$!
 for _ in $(seq 1 60); do
@@ -186,5 +203,54 @@ if received != payload:
     raise RuntimeError("CONNECT tunnel corrupted payload")
 sock.close()
 PY
+
+echo "7. only-if-cached never contacts the origin when cache is bypassed"
+status="$(pcurl -H 'Cache-Control: only-if-cached' -H 'If-None-Match: "missing"' \
+    -o /dev/null -w '%{http_code}' "$ORIGIN/only-if-cached")"
+[[ "$status" == "504" ]] || fail "conditional only-if-cached request returned $status instead of 504"
+if grep -q 'GET /only-if-cached ' "$WORK_DIR/origin.log"; then
+    fail "conditional only-if-cached request reached the origin"
+fi
+
+"$PROXY_BIN" --listen 127.0.0.1 --port "$NOCACHE_PROXY_PORT" --threads 2 --timeout 3 \
+    --no-cache --log-level debug > "$WORK_DIR/no-cache-proxy.log" 2>&1 &
+NOCACHE_PROXY_PID=$!
+for _ in $(seq 1 60); do
+    curl --noproxy '' -sS --max-time 1 "http://127.0.0.1:$NOCACHE_PROXY_PORT/__proxy/stats" >/dev/null 2>&1 && break
+    sleep 0.1
+done
+status="$(curl --noproxy '' -sS --max-time 5 -x "http://127.0.0.1:$NOCACHE_PROXY_PORT" \
+    -H 'Cache-Control: only-if-cached' -o /dev/null -w '%{http_code}' "$ORIGIN/only-if-cached")"
+[[ "$status" == "504" ]] || fail "only-if-cached with --no-cache returned $status instead of 504"
+if grep -q 'GET /only-if-cached ' "$WORK_DIR/origin.log"; then
+    fail "only-if-cached request with --no-cache reached the origin"
+fi
+kill "$NOCACHE_PROXY_PID" 2>/dev/null || true
+wait "$NOCACHE_PROXY_PID" 2>/dev/null || true
+NOCACHE_PROXY_PID=""
+
+echo "8. simultaneous client connections are capped"
+python3 - "$PROXY_PORT" <<'PY'
+import socket, sys, time
+port = int(sys.argv[1])
+clients = []
+for _ in range(2):
+    client = socket.create_connection(("127.0.0.1", port), timeout=2)
+    client.settimeout(2)
+    clients.append(client)
+    time.sleep(0.1)
+rejected = socket.create_connection(("127.0.0.1", port), timeout=2)
+rejected.settimeout(2)
+if rejected.recv(1) != b"":
+    raise RuntimeError("connection beyond --max-connections was not rejected")
+rejected.close()
+for client in clients:
+    client.close()
+PY
+
+echo "9. upstream total timeout stops a slow-drip response"
+status="$(curl --noproxy '' -sS --max-time 8 -x "$PROXY" -o "$WORK_DIR/slow-drip.body" \
+    -w '%{http_code}' "$ORIGIN/slow-drip" || true)"
+[[ "$status" == "504" ]] || fail "slow-drip origin response returned $status instead of 504"
 
 echo "integration test passed"

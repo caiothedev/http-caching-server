@@ -231,5 +231,9 @@ Todos os timeouts usam `Deadline`, um watchdog com um único `steady_timer` por 
 
 Possíveis evoluções: streaming de respostas grandes, pool de conexões, cache em disco, `stale-while-revalidate`, autenticação `Proxy-Authorization` e métricas no formato Prometheus.
 
+## Timeouts da origem
+
+Cada troca com a origem possui dois prazos independentes, configurados por `--timeout`: um prazo absoluto, iniciado antes da resolução DNS e nunca estendido, e um prazo de inatividade, renovado somente quando uma etapa termina ou chegam bytes da resposta. O envio contínuo de pequenos fragmentos não mantém a troca ativa além do prazo absoluto.
+
 by caiothedev<br />
 #architecture

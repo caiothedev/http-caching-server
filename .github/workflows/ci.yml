@@ -46,20 +46,44 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build libboost-dev clang-format
+          sudo apt-get install -y --no-install-recommends cmake ninja-build libboost-dev clang-format clang-tools
           # clang needs compiler-rt for -fsanitize=address,undefined
           if [ "${{ matrix.compiler }}" = "clang" ]; then
             sudo apt-get install -y --no-install-recommends clang libclang-rt-dev
           fi
 
-      - name: Check C++ formatting
+      - name: Check changed C++ formatting
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          find src tests -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
-            | xargs -0 -r clang-format --dry-run --Werror
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="origin/$BASE_REF"
+          elif [[ "$EVENT_BEFORE" =~ ^0+$ ]]; then
+            base="origin/main"
+          else
+            base="$EVENT_BEFORE"
+          fi
+
+          diff="$(git diff -U0 "$base...$GITHUB_SHA" -- '*.cpp' '*.hpp')"
+          if [[ -z "$diff" ]]; then
+            echo "No changed C++ files to format-check."
+            exit 0
+          fi
+
+          formatting_diff="$(printf '%s\n' "$diff" | clang-format-diff -p1 -style=file)"
+          if [[ -n "$formatting_diff" ]]; then
+            printf '%s\n' "$formatting_diff"
+            echo "Changed C++ lines are not clang-formatted."
+            exit 1
+          fi
 
       - name: Configure
         run: >
