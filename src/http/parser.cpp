@@ -314,7 +314,7 @@ namespace proxy::http {
         saw_bytes_ = false;
     }
 
-    bool ParserBase::body_from_headers(BodySpec& spec, bool) {
+    bool ParserBase::body_from_headers(BodySpec& spec, bool is_request) {
         // The proxy only implements the chunked transfer coding. Reject other
         // codings instead of silently exposing still-encoded bytes as the payload.
         if (headers_.contains("Transfer-Encoding")) {
@@ -322,7 +322,14 @@ namespace proxy::http {
                 fail(ParseError::BadTransferEncoding, "Transfer-Encoding with Content-Length is ambiguous");
                 return false;
             }
-            const std::string transfer_encoding = headers_.get_combined("Transfer-Encoding");
+            std::string transfer_encoding;
+            bool first_transfer_encoding = true;
+            for (const auto& field : headers_) {
+                if (!util::iequals(field.name, "Transfer-Encoding")) continue;
+                if (!first_transfer_encoding) transfer_encoding += ", ";
+                transfer_encoding += field.value;
+                first_transfer_encoding = false;
+            }
             const auto transfer_status = parse_transfer_encoding(transfer_encoding);
             if (transfer_status == TransferEncodingStatus::Invalid) {
                 fail(ParseError::BadTransferEncoding, "malformed Transfer-Encoding");
@@ -337,20 +344,30 @@ namespace proxy::http {
         }
 
         if (headers_.contains("Content-Length")) {
-            // Accept repeated identical values ("10, 10"), reject anything else.
-            // Keep the combined string alive: split_list returns views into it.
-            const std::string combined = headers_.get_combined("Content-Length");
-            auto values = util::split_list(combined);
+            // Accept repeated identical values, but preserve empty list elements:
+            // split_list() intentionally drops them and is too permissive here.
             std::uint64_t length = 0;
             bool first = true;
-            for (auto v : values) {
-                std::uint64_t n = 0;
-                if (!util::parse_uint(v, n) || (!first && n != length)) {
-                    fail(ParseError::BadContentLength, "invalid Content-Length");
-                    return false;
+            for (const auto& field : headers_) {
+                if (!util::iequals(field.name, "Content-Length")) continue;
+
+                std::size_t start = 0;
+                while (start <= field.value.size()) {
+                    auto end = field.value.find(',', start);
+                    if (end == std::string::npos) end = field.value.size();
+
+                    auto value = util::trim(std::string_view(field.value).substr(start, end - start));
+                    std::uint64_t n = 0;
+                    if (!util::parse_uint(value, n) || (!first && n != length)) {
+                        fail(ParseError::BadContentLength, "invalid Content-Length");
+                        return false;
+                    }
+                    length = n;
+                    first = false;
+
+                    if (end == field.value.size()) break;
+                    start = end + 1;
                 }
-                length = n;
-                first = false;
             }
             if (first) {
                 fail(ParseError::BadContentLength, "empty Content-Length");
@@ -397,8 +414,12 @@ namespace proxy::http {
     }
 
     ParserBase::HeadersAction RequestParser::on_headers_complete(BodySpec& spec) {
-        if (version_.minor >= 1 && !headers_.contains("Host")) {
-            fail(ParseError::BadHeader, "missing Host header");
+        std::size_t host_count = 0;
+        for (const auto& field : headers_) {
+            if (util::iequals(field.name, "Host")) ++host_count;
+        }
+        if (host_count > 1 || (version_.minor >= 1 && host_count != 1)) {
+            fail(ParseError::BadHeader, host_count == 0 ? "missing Host header" : "multiple Host headers");
             return HeadersAction::Fail;
         }
         if (headers_.contains("Expect")) {

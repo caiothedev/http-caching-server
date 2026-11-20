@@ -131,6 +131,47 @@ TEST_CASE("rejects malformed requests", "[parser]") {
           ParseError::BadHeader);
 }
 
+TEST_CASE("rejects duplicate Host fields and empty Content-Length list elements", "[parser]") {
+    auto parse = [](const std::string& raw) {
+        RequestParser p;
+        p.feed(raw);
+        return p;
+    };
+
+    CHECK(parse("GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n").error() ==
+          ParseError::BadHeader);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 2,,2\r\n\r\n").error() ==
+          ParseError::BadContentLength);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: ,2\r\n\r\n").error() ==
+          ParseError::BadContentLength);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 2,\r\n\r\n").error() ==
+          ParseError::BadContentLength);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length:\r\nContent-Length: 2\r\n\r\n").error() ==
+          ParseError::BadContentLength);
+}
+
+TEST_CASE("rejects empty and repeated Transfer-Encoding fields", "[parser]") {
+    auto parse = [](const std::string& raw) {
+        RequestParser p;
+        p.feed(raw);
+        return p;
+    };
+
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding:\r\nTransfer-Encoding: chunked\r\n\r\n").error() ==
+          ParseError::BadTransferEncoding);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n").error() ==
+          ParseError::BadTransferEncoding);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\n").error() ==
+          ParseError::BadContentLength);
+}
+
+TEST_CASE("accepts repeated identical Content-Length header fields", "[parser]") {
+    RequestParser p;
+    p.feed("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\nok");
+    REQUIRE(p.status() == ParseStatus::Complete);
+    CHECK(p.take().body == "ok");
+}
+
 TEST_CASE("accepts repeated identical Content-Length values", "[parser]") {
     RequestParser p;
     p.feed("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 2, 2\r\n\r\nok");
@@ -208,7 +249,7 @@ TEST_CASE("responses to HEAD and 204/205/304 have no body", "[parser][response]"
     CHECK(encoded_reset_content.error() == ParseError::BadTransferEncoding);
 }
 
-EST_CASE("rejects unsupported transfer codings in origin responses", "[parser][response]") {
+TEST_CASE("rejects unsupported transfer codings in origin responses", "[parser][response]") {
     ResponseParser p("GET");
     p.feed("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n");
     CHECK(p.error() == ParseError::UnsupportedTransferEncoding);
