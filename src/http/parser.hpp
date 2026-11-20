@@ -11,7 +11,7 @@ namespace proxy::http {
     struct ParserLimits {
         std::size_t max_header_bytes = 64 * 1024;  // start line + all header lines
         std::size_t max_header_count = 100;
-        std::size_t max_body_bytes = 64 * 1024 * 1024;
+        std::size_t max_body_bytes = 8 * 1024 * 1024;
     };
 
     enum class ParseStatus { NeedMore, Complete, Error };

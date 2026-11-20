@@ -20,6 +20,7 @@ namespace proxy {
     struct ProxyStats {
         std::atomic<std::uint64_t> connections{0};
         std::atomic<std::int64_t> active_connections{0};
+        std::atomic<std::int64_t> active_tunnels{0};
         std::atomic<std::uint64_t> requests{0};
         std::atomic<std::uint64_t> tunnels{0};
         std::atomic<std::uint64_t> upstream_errors{0};

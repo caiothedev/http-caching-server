@@ -44,10 +44,11 @@ namespace proxy {
         auto ep = client_.remote_endpoint(ec);
         peer_ = ec ? "?" : ep.address().to_string() + ":" + std::to_string(ep.port());
         ctx_->stats.connections++;
-        ctx_->stats.active_connections++;
     }
 
-    Session::~Session() { ctx_->stats.active_connections--; }
+    Session::~Session() {
+        if (!connection_slot_transferred_) ctx_->stats.active_connections--;
+    }
 
     void Session::start() {
         LOG_DEBUG("[" << id_ << "] connection from " << peer_);
@@ -219,24 +220,25 @@ namespace proxy {
         auto& s = ctx_->stats;
         std::ostringstream json;
         json << "{\n"
-            << "  \"connections\": " << s.connections.load() << ",\n"
-            << "  \"active_connections\": " << s.active_connections.load() << ",\n"
-            << "  \"requests\": " << s.requests.load() << ",\n"
-            << "  \"tunnels\": " << s.tunnels.load() << ",\n"
-            << "  \"upstream_errors\": " << s.upstream_errors.load() << ",\n"
-            << "  \"cache\": {\n"
-            << "    \"enabled\": " << (ctx_->config.cache_enabled ? "true" : "false") << ",\n"
-            << "    \"entries\": " << c.entries << ",\n"
-            << "    \"bytes\": " << c.bytes << ",\n"
-            << "    \"capacity\": " << c.capacity << ",\n"
-            << "    \"hits\": " << c.hits << ",\n"
-            << "    \"misses\": " << c.misses << ",\n"
-            << "    \"revalidations\": " << c.revalidations << ",\n"
-            << "    \"stores\": " << c.stores << ",\n"
-            << "    \"evictions\": " << c.evictions << ",\n"
-            << "    \"invalidations\": " << c.invalidations << "\n"
-            << "  }\n"
-            << "}\n";
+             << "  \"connections\": " << s.connections.load() << ",\n"
+             << "  \"active_connections\": " << s.active_connections.load() << ",\n"
+             << "  \"active_tunnels\": " << s.active_tunnels.load() << ",\n"
+             << "  \"requests\": " << s.requests.load() << ",\n"
+             << "  \"tunnels\": " << s.tunnels.load() << ",\n"
+             << "  \"upstream_errors\": " << s.upstream_errors.load() << ",\n"
+             << "  \"cache\": {\n"
+             << "    \"enabled\": " << (ctx_->config.cache_enabled ? "true" : "false") << ",\n"
+             << "    \"entries\": " << c.entries << ",\n"
+             << "    \"bytes\": " << c.bytes << ",\n"
+             << "    \"capacity\": " << c.capacity << ",\n"
+             << "    \"hits\": " << c.hits << ",\n"
+             << "    \"misses\": " << c.misses << ",\n"
+             << "    \"revalidations\": " << c.revalidations << ",\n"
+             << "    \"stores\": " << c.stores << ",\n"
+             << "    \"evictions\": " << c.evictions << ",\n"
+             << "    \"invalidations\": " << c.invalidations << "\n"
+             << "  }\n"
+             << "}\n";
 
         http::Response resp;
         resp.status = 200;
@@ -454,9 +456,15 @@ namespace proxy {
         // From here on the Tunnel owns both sockets; this session is finished.
         closed_ = true;
         deadline_.stop();
+        connection_slot_transferred_ = true;
         ctx_->stats.tunnels++;
+        ctx_->stats.active_tunnels++;
+        auto ctx = ctx_;
         auto tunnel = std::make_shared<Tunnel>(std::move(client_), std::move(*tunnel_socket_),
-                                            ctx_->config.tunnel_idle_timeout, id_);
+                                               ctx_->config.tunnel_idle_timeout, id_, [ctx] {
+                                                   ctx->stats.active_tunnels--;
+                                                   ctx->stats.active_connections--;
+                                               });
         if (tunnel_handler_) tunnel_handler_(tunnel);
         tunnel->start(std::move(pending_));
     }

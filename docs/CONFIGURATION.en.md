@@ -38,9 +38,11 @@ Options that take a value accept both forms:
 | `-p, --port N` | `8080` | 1–65535 | TCP listening port. |
 | `-t, --threads N` | CPU count | 1–1024 | Number of worker threads running the Asio event loop. |
 | `--cache-size MB` | `64` | 1–1,048,576 MiB | Total cache capacity. |
-| `--max-object MB` | `8` | 1–1,048,576 MiB | Maximum estimated size of one cache entry. |
+| `--max-object MB` | `8` | 1–1,048,576 MiB | Maximum estimated cache entry size, clamped to cache capacity and body limit. |
+| `--max-connections N` | `16` | 1–1024 | Maximum simultaneous client connections, including CONNECT tunnels. |
+| `--max-body MB` | `8` | 1–128 MiB | Maximum individual request/response body size. The product of this value and `--max-connections` cannot exceed 128 MiB. |
 | `--no-cache` | disabled | flag | Disables cache lookup and storage; requests are forwarded. |
-| `--timeout SEC` | `30` | 1–3600 seconds | Upstream connection/read timeout. |
+| `--timeout SEC` | `30` | 1–3600 seconds | Maximum upstream total duration and inactivity period; both use this timeout. |
 | `--idle-timeout SEC` | `60` | 1–3600 seconds | Idle client keep-alive timeout. |
 | `--tunnel-timeout SEC` | `300` | 1–86400 seconds | Idle CONNECT tunnel timeout. |
 | `--connect-ports LIST` | `443` | Comma-separated ports 1–65535, or `any` | Destination ports permitted for CONNECT. |
@@ -61,9 +63,11 @@ The HTTP parser defaults are:
 
 - Maximum start-line plus header section: 64 KiB.
 - Maximum header fields: 100.
-- Maximum message body: 64 MiB.
+- Maximum message body: 8 MiB.
 
-The effective body limit is raised when the configured maximum cache entry is larger than the parser's default body limit. The maximum cache entry size is also clamped to the total cache capacity when it is larger.
+The server admits up to 16 simultaneous client connections by default, including CONNECT tunnels. `--max-connections` and `--max-body` are validated together so their product cannot exceed 128 MiB of configured in-flight message-body capacity. Fixed `Content-Length` values are validated without reserving the full declared body before the payload arrives.
+
+The maximum cache entry size is clamped to both the total cache capacity and the configured parser body limit.
 
 ## 4. CONNECT port policy
 

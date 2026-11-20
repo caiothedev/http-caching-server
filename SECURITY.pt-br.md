@@ -42,11 +42,11 @@ Depois que o túnel é estabelecido, o proxy retransmite os bytes e não inspeci
 
 ## Parser e limites de recursos
 
-O parser HTTP impõe limites ao tamanho dos cabeçalhos, à quantidade de campos de cabeçalho e ao tamanho do corpo da mensagem. Os padrões são 64 KiB para a linha inicial mais os cabeçalhos, 100 campos de cabeçalho e 64 MiB para os corpos. O limite efetivo do corpo é aumentado quando necessário para comportar o tamanho máximo configurado para um objeto em cache.
+O parser HTTP impõe limites ao tamanho dos cabeçalhos, à quantidade de campos de cabeçalho e ao tamanho do corpo da mensagem. Os padrões são 64 KiB para a linha inicial mais os cabeçalhos, 100 campos de cabeçalho e 8 MiB para corpos de requisições/respostas. O limite padrão é de 16 clientes simultâneos, incluindo túneis CONNECT. O produto configurado de `--max-connections` por `--max-body` não pode exceder 128 MiB. Valores fixos de `Content-Length` são verificados sem reservar antecipadamente todo o corpo declarado antes da chegada dos bytes.
 
 O parser rejeita enquadramentos ambíguos com `Transfer-Encoding` e `Content-Length` simultâneos, enquadramentos malformados, codificações de transferência não suportadas e atualizações de protocolo não suportadas. Somente a codificação de transferência `chunked` é implementada. Essas verificações reduzem ambiguidades de interpretação, mas não substituem o isolamento de rede nem uma revisão de segurança.
 
-O cache possui capacidade total e tamanho máximo por objeto configuráveis. Esses valores limitam a memória usada pelo armazenamento em cache, mas não representam um limite completo de memória do processo: conexões ativas e corpos de requisições/respostas em processamento também consomem memória.
+O cache possui capacidade total e tamanho máximo por objeto configuráveis. Os limites de conexões e de corpo restringem o armazenamento simultâneo dos corpos de mensagens separadamente do cache. Isso não representa um limite rígido de memória RSS do processo: serialização de respostas, buffers de socket, capacidade dos alocadores, estado do protocolo e metadados do cache também consomem memória.
 
 ## Lista de verificação de implantação
 

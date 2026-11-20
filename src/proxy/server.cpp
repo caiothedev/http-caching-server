@@ -13,6 +13,19 @@ namespace proxy {
     namespace asio = boost::asio;
     using tcp = asio::ip::tcp;
 
+    namespace {
+
+    bool try_acquire_connection_slot(const std::shared_ptr<ProxyContext>& ctx) {
+        auto active = ctx->stats.active_connections.load();
+        const auto limit = static_cast<std::int64_t>(ctx->config.max_connections);
+        while (active < limit) {
+            if (ctx->stats.active_connections.compare_exchange_weak(active, active + 1)) return true;
+        }
+        return false;
+    }
+
+    }  // namespace
+
     Server::Server(asio::io_context& io, std::shared_ptr<ProxyContext> ctx)
         : io_(io), acceptor_(io), ctx_(std::move(ctx)) {}
 
@@ -59,6 +72,10 @@ namespace proxy {
             if (ec == asio::error::operation_aborted) return;  // acceptor closed
             if (ec) {
                 LOG_WARN("accept failed: " << ec.message());
+            } else if (!try_acquire_connection_slot(ctx_)) {
+                LOG_WARN("maximum client connections reached; rejecting connection");
+                boost::system::error_code ignored;
+                socket.close(ignored);
             } else {
                 auto session = std::make_shared<Session>(std::move(socket), ctx_);
                 session->set_tunnel_handler([this](std::shared_ptr<Tunnel> tunnel) {

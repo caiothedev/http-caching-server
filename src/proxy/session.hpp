@@ -86,6 +86,7 @@ namespace proxy {
         std::unique_ptr<boost::asio::ip::tcp::resolver> resolver_;
         std::unique_ptr<boost::asio::ip::tcp::socket> tunnel_socket_;
 
+        bool connection_slot_transferred_ = false;
         bool closed_ = false;
     };
 

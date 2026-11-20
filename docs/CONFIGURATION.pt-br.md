@@ -38,9 +38,11 @@ Opções que recebem um valor aceitam as duas formas:
 | `-p, --port N` | `8080` | 1–65535 | Porta TCP de escuta. |
 | `-t, --threads N` | Quantidade de CPUs | 1–1024 | Número de threads que executam o loop de eventos do Asio. |
 | `--cache-size MB` | `64` | 1–1.048.576 MiB | Capacidade total do cache. |
-| `--max-object MB` | `8` | 1–1.048.576 MiB | Tamanho estimado máximo de uma entrada do cache. |
+| `--max-object MB` | `8` | 1–1.048.576 MiB | Tamanho estimado máximo de uma entrada do cache, limitado pela capacidade e pelo tamanho máximo do corpo. |
+| `--max-connections N` | `16` | 1–1024 | Máximo de conexões simultâneas de clientes, incluindo túneis CONNECT. |
+| `--max-body MB` | `8` | 1–128 MiB | Tamanho máximo individual de corpos de requisições/respostas. O produto deste valor por `--max-connections` não pode exceder 128 MiB. |
 | `--no-cache` | desabilitado | flag | Desabilita consulta e armazenamento em cache; as requisições são encaminhadas. |
-| `--timeout SEC` | `30` | 1–3600 segundos | Timeout de conexão/leitura com a origem. |
+| `--timeout SEC` | `30` | 1–3600 segundos | Duração total máxima e período máximo de inatividade da troca com a origem; ambos usam este valor. |
 | `--idle-timeout SEC` | `60` | 1–3600 segundos | Timeout de inatividade da conexão keep-alive do cliente. |
 | `--tunnel-timeout SEC` | `300` | 1–86400 segundos | Timeout de inatividade do túnel CONNECT. |
 | `--connect-ports LIST` | `443` | Portas de 1–65535 separadas por vírgula, ou `any` | Portas de destino permitidas para CONNECT. |
@@ -61,9 +63,11 @@ Os padrões do parser HTTP são:
 
 - Tamanho máximo da linha inicial mais a seção de cabeçalhos: 64 KiB.
 - Quantidade máxima de campos de cabeçalho: 100.
-- Tamanho máximo do corpo da mensagem: 64 MiB.
+- Tamanho máximo do corpo da mensagem: 8 MiB.
 
-O limite efetivo do corpo é aumentado quando o tamanho máximo configurado para uma entrada do cache é maior que o limite padrão do parser. O tamanho máximo por entrada também é limitado à capacidade total do cache quando for maior que ela.
+Por padrão, o servidor admite até 16 conexões simultâneas de clientes, incluindo túneis CONNECT. `--max-connections` e `--max-body` são validados em conjunto para que o produto não exceda 128 MiB de capacidade configurada para corpos em trânsito. Valores fixos de `Content-Length` são verificados sem reservar antecipadamente todo o corpo declarado antes da chegada do payload.
+
+O tamanho máximo por entrada do cache é limitado tanto pela capacidade total quanto pelo limite configurado para os corpos do parser.
 
 ## 4. Política de portas CONNECT
 

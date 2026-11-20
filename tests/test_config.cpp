@@ -21,6 +21,8 @@ TEST_CASE("command line defaults are applied", "[config]") {
     CHECK(result.config->listen_address == "127.0.0.1");
     CHECK(result.config->port == 8080);
     CHECK(result.config->threads == 0);
+    CHECK(result.config->max_connections == 16);
+    CHECK(result.config->limits.max_body_bytes == 8u * 1024u * 1024u);
     CHECK(result.config->cache_enabled);
     CHECK((result.config->connect_ports == std::vector<std::uint16_t>{443}));
     CHECK(result.config->upstream_timeout == std::chrono::seconds{30});
@@ -29,13 +31,16 @@ TEST_CASE("command line defaults are applied", "[config]") {
 TEST_CASE("command line accepts separated and inline values", "[config]") {
     auto result = parse({
         "http_proxy", "--listen", "0.0.0.0", "--port=9000", "--threads", "4",
-        "--cache-size=32", "--max-object", "16", "--timeout=45", "--idle-timeout", "90",
+        "--cache-size=32", "--max-object", "16", "--max-connections=4", "--max-body", "16",
+        "--timeout=45", "--idle-timeout", "90",
         "--tunnel-timeout=600", "--connect-ports", "443,8443", "--log-level", "debug",
     });
     REQUIRE(result.config);
     CHECK(result.config->listen_address == "0.0.0.0");
     CHECK(result.config->port == 9000);
     CHECK(result.config->threads == 4);
+    CHECK(result.config->max_connections == 4);
+    CHECK(result.config->limits.max_body_bytes == 16u * 1024u * 1024u);
     CHECK(result.config->cache.max_bytes == 32u * 1024u * 1024u);
     CHECK(result.config->cache.max_entry_bytes == 16u * 1024u * 1024u);
     CHECK(result.config->upstream_timeout == std::chrono::seconds{45});
@@ -49,7 +54,9 @@ TEST_CASE("numeric options enforce their documented ranges", "[config]") {
     const std::vector<std::vector<std::string>> invalid = {
         {"http_proxy", "--port", "0"}, {"http_proxy", "--port", "65536"},
         {"http_proxy", "--port", "abc"}, {"http_proxy", "--threads", "0"},
-        {"http_proxy", "--threads", "1025"}, {"http_proxy", "--cache-size", "0"},
+        {"http_proxy", "--threads", "1025"}, {"http_proxy", "--max-connections", "0"},
+        {"http_proxy", "--max-connections", "1025"}, {"http_proxy", "--max-body", "0"},
+        {"http_proxy", "--max-body", "129"}, {"http_proxy", "--cache-size", "0"},
         {"http_proxy", "--cache-size", "1048577"}, {"http_proxy", "--max-object", "0"},
         {"http_proxy", "--timeout", "3601"}, {"http_proxy", "--idle-timeout", "-1"},
         {"http_proxy", "--tunnel-timeout", "86401"}, {"http_proxy", "--connect-ports", ""},
@@ -64,12 +71,22 @@ TEST_CASE("numeric options enforce their documented ranges", "[config]") {
     }
 }
 
-TEST_CASE("cache object size is clamped to cache capacity", "[config]") {
-    auto result = parse({"http_proxy", "--cache-size", "4", "--max-object", "8"});
+TEST_CASE("aggregate in-flight body budget is enforced", "[config]") {
+    auto default_budget = parse({"http_proxy", "--max-connections", "16", "--max-body", "8"});
+    REQUIRE(default_budget.config);
+    auto higher_concurrency = parse({"http_proxy", "--max-connections", "32", "--max-body", "4"});
+    REQUIRE(higher_concurrency.config);
+    auto invalid = parse({"http_proxy", "--max-connections", "17", "--max-body", "8"});
+    CHECK_FALSE(invalid.config);
+    CHECK(invalid.exit_code == 2);
+}
+
+TEST_CASE("cache object size is clamped to cache capacity and body limit", "[config]") {
+    auto result = parse({"http_proxy", "--cache-size", "4", "--max-object", "8", "--max-body", "2"});
     REQUIRE(result.config);
     CHECK(result.config->cache.max_bytes == 4u * 1024u * 1024u);
-    CHECK(result.config->cache.max_entry_bytes == 4u * 1024u * 1024u);
-    CHECK(result.config->limits.max_body_bytes >= result.config->cache.max_entry_bytes);
+    CHECK(result.config->cache.max_entry_bytes == 2u * 1024u * 1024u);
+    CHECK(result.config->limits.max_body_bytes == result.config->cache.max_entry_bytes);
 }
 
 TEST_CASE("CONNECT port policy accepts any or a validated list", "[config]") {
