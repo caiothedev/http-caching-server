@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main, 'test/**']
   pull_request:
   workflow_dispatch:
 
@@ -46,20 +45,50 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build libboost-dev clang-format
+          sudo apt-get install -y --no-install-recommends cmake ninja-build libboost-dev clang-format clang-tools
           # clang needs compiler-rt for -fsanitize=address,undefined
           if [ "${{ matrix.compiler }}" = "clang" ]; then
             sudo apt-get install -y --no-install-recommends clang libclang-rt-dev
           fi
 
-      - name: Check C++ formatting
+      - name: Check changed C++ formatting
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          find src tests -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
-            | xargs -0 -r clang-format --dry-run --Werror
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="origin/$BASE_REF"
+          elif [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            if [[ -z "$EVENT_BEFORE" || "$EVENT_BEFORE" =~ ^0+$ ]]; then
+              base="HEAD^"
+            else
+              base="$EVENT_BEFORE"
+            fi
+          else
+            # Check the entire feature branch, not only the most recent push.
+            base="origin/main"
+          fi
+
+          diff="$(git diff -U0 "$base...$GITHUB_SHA" -- '*.cpp' '*.hpp')"
+          if [[ -z "$diff" ]]; then
+            echo "No changed C++ files to format-check."
+            exit 0
+          fi
+
+          command -v clang-format-diff >/dev/null || { echo "clang-format-diff is required but was not found."; exit 1; }
+          formatting_diff="$(printf '%s\n' "$diff" | clang-format-diff -p1 -style=file || true)"
+          if [[ -n "$formatting_diff" ]]; then
+            printf '%s\n' "$formatting_diff"
+            echo "Changed C++ lines are not clang-formatted."
+            exit 1
+          fi
 
       - name: Configure
         run: >
