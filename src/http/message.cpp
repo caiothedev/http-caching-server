@@ -132,6 +132,7 @@ namespace proxy::http {
             case 411: return "Length Required";
             case 413: return "Content Too Large";
             case 414: return "URI Too Long";
+            case 417: return "Expectation Failed";
             case 431: return "Request Header Fields Too Large";
             case 500: return "Internal Server Error";
             case 501: return "Not Implemented";
@@ -146,7 +147,7 @@ namespace proxy::http {
     bool response_has_no_body(std::string_view request_method, int status) {
         if (request_method == "HEAD") return true;
         if (status >= 100 && status < 200) return true;
-        return status == 204 || status == 304;
+        return status == 204 || status == 205 || status == 304;
     }
 
     void remove_hop_by_hop(Headers& headers) {

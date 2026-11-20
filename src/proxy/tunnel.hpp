@@ -23,6 +23,7 @@ namespace proxy {
         // `client_pending` holds bytes the client sent right after the CONNECT
         // request (already read from the socket); they are forwarded first.
         void start(std::string client_pending);
+        void shutdown();
 
     private:
         struct Direction {

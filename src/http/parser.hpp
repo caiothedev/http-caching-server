@@ -24,6 +24,8 @@ namespace proxy::http {
         HeadersTooLarge,
         BadContentLength,
         BadTransferEncoding,
+        UnsupportedTransferEncoding,
+        ExpectationFailed,
         BadChunk,
         BodyTooLarge,
         UnexpectedEof,
@@ -69,8 +71,7 @@ namespace proxy::http {
 
         void fail(ParseError error, std::string message);
         void reset_base();
-        // Shared Content-Length / Transfer-Encoding logic. `is_request` selects the
-        // behaviour for a non-chunked Transfer-Encoding (error vs. read-until-close).
+        // Shared Content-Length / Transfer-Encoding logic. Only chunked is supported.
         bool body_from_headers(BodySpec& spec, bool is_request);
 
         Headers headers_;

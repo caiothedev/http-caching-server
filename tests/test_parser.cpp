@@ -45,9 +45,15 @@ TEST_CASE("parses requests split at arbitrary byte boundaries", "[parser]") {
     CHECK(p.take().body == "hello world");
 }
 
-TEST_CASE("accepts bare LF line endings and leading empty lines", "[parser]") {
+TEST_CASE("rejects bare LF line endings", "[parser]") {
     RequestParser p;
-    p.feed("\r\nGET / HTTP/1.0\nHost: a\n\n");
+    p.feed("GET / HTTP/1.0\nHost: a\n\n");
+    CHECK(p.error() == ParseError::BadHeader);
+}
+
+TEST_CASE("accepts leading empty CRLF lines", "[parser]") {
+    RequestParser p;
+    p.feed("\r\nGET / HTTP/1.0\r\nHost: a\r\n\r\n");
     REQUIRE(p.status() == ParseStatus::Complete);
     CHECK(p.take().version == Version{1, 0});
 }
@@ -110,9 +116,19 @@ TEST_CASE("rejects malformed requests", "[parser]") {
     CHECK(parse("GET / HTTP/1.1\r\nHost: a\r\nContent-Length: 1, 2\r\n\r\n").error() ==
           ParseError::BadContentLength);
     CHECK(parse("GET / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip\r\n\r\n").error() ==
-          ParseError::BadTransferEncoding);
+          ParseError::UnsupportedTransferEncoding);
     CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n").error() ==
           ParseError::BadChunk);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\n\r\n").error() ==
+          ParseError::UnsupportedTransferEncoding);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nContent-Length: 1\r\n\r\n").error() ==
+          ParseError::BadTransferEncoding);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nExpect: 100-continue, other\r\nContent-Length: 1\r\n\r\n").error() ==
+          ParseError::ExpectationFailed);
+    CHECK(parse("POST / HTTP/1.1\r\nHost: a\r\nExpect: something-else\r\n\r\n").error() ==
+          ParseError::ExpectationFailed);
+    CHECK(parse("GET / HTTP/1.1\r\nHost: a\r\nX-Test: value\001bad\r\n\r\n").error() ==
+          ParseError::BadHeader);
 }
 
 TEST_CASE("accepts repeated identical Content-Length values", "[parser]") {
@@ -122,13 +138,10 @@ TEST_CASE("accepts repeated identical Content-Length values", "[parser]") {
     CHECK(p.take().body == "ok");
 }
 
-TEST_CASE("Transfer-Encoding wins over Content-Length", "[parser]") {
+TEST_CASE("rejects Transfer-Encoding combined with Content-Length", "[parser]") {
     RequestParser p;
     p.feed("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 100\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n\r\n");
-    REQUIRE(p.status() == ParseStatus::Complete);
-    auto req = p.take();
-    CHECK(req.body == "ok");
-    CHECK_FALSE(req.headers.contains("Content-Length"));
+    CHECK(p.error() == ParseError::BadTransferEncoding);
 }
 
 TEST_CASE("enforces header and body limits", "[parser]") {
@@ -169,7 +182,7 @@ TEST_CASE("reads response bodies until close when unframed", "[parser][response]
     CHECK(p.take().body == "part one, part two");
 }
 
-TEST_CASE("responses to HEAD and 204/304 have no body", "[parser][response]") {
+TEST_CASE("responses to HEAD and 204/205/304 have no body", "[parser][response]") {
     ResponseParser head("HEAD");
     head.feed("HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n");
     CHECK(head.status() == ParseStatus::Complete);
@@ -181,6 +194,31 @@ TEST_CASE("responses to HEAD and 204/304 have no body", "[parser][response]") {
     ResponseParser no_content("GET");
     no_content.feed("HTTP/1.1 204 No Content\r\n\r\n");
     CHECK(no_content.status() == ParseStatus::Complete);
+
+    ResponseParser reset_content("GET");
+    reset_content.feed("HTTP/1.1 205 Reset Content\r\nContent-Length: 0\r\n\r\n");
+    CHECK(reset_content.status() == ParseStatus::Complete);
+
+    ResponseParser invalid_reset_content("GET");
+    invalid_reset_content.feed("HTTP/1.1 205 Reset Content\r\nContent-Length: 4\r\n\r\ndata");
+    CHECK(invalid_reset_content.error() == ParseError::BadContentLength);
+
+    ResponseParser encoded_reset_content("GET");
+    encoded_reset_content.feed("HTTP/1.1 205 Reset Content\r\nTransfer-Encoding: chunked\r\n\r\n");
+    CHECK(encoded_reset_content.error() == ParseError::BadTransferEncoding);
+}
+
+EST_CASE("rejects unsupported transfer codings in origin responses", "[parser][response]") {
+    ResponseParser p("GET");
+    p.feed("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n");
+    CHECK(p.error() == ParseError::UnsupportedTransferEncoding);
+}
+
+TEST_CASE("parses 101 as a terminal response for explicit rejection by proxy", "[parser][response]") {
+    ResponseParser p("GET");
+    p.feed("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+    REQUIRE(p.status() == ParseStatus::Complete);
+    CHECK(p.take().status == 101);
 }
 
 TEST_CASE("skips interim 1xx responses", "[parser][response]") {
@@ -211,6 +249,10 @@ TEST_CASE("reports truncated responses", "[parser][response]") {
     ResponseParser bad("GET");
     bad.feed("HTTP/1.1 2x0 OK\r\n\r\n");
     CHECK(bad.error() == ParseError::BadStartLine);
+}
+
+TEST_CASE("includes the Expectation Failed reason phrase", "[message]") {
+    CHECK(reason_phrase(417) == "Expectation Failed");
 }
 
 TEST_CASE("serializes messages", "[message]") {

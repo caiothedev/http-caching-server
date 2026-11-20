@@ -1,5 +1,6 @@
 #include "proxy/tunnel.hpp"
 
+#include <boost/asio/post.hpp>
 #include <boost/asio/write.hpp>
 
 #include "util/logger.hpp"
@@ -75,6 +76,11 @@ namespace proxy {
         boost::system::error_code ignored;
         dir.to->shutdown(tcp::socket::shutdown_send, ignored);
         if (upstream_.done && downstream_.done) close();
+    }
+
+    void Tunnel::shutdown() {
+        auto self = shared_from_this();
+        asio::post(client_.get_executor(), [self] { self->close(); });
     }
 
     void Tunnel::close() {

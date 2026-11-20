@@ -19,6 +19,34 @@ namespace proxy::http {
             return true;
         }
 
+        bool valid_field_value(std::string_view value) {
+            for (unsigned char c : value) {
+                if (c == '\t' || (c >= 0x20 && c != 0x7f)) continue;
+                return false;
+            }
+            return true;
+        }
+
+        enum class TransferEncodingStatus { Supported, Unsupported, Invalid };
+
+        TransferEncodingStatus parse_transfer_encoding(std::string_view value) {
+            std::size_t count = 0;
+            std::size_t start = 0;
+            bool unsupported = false;
+            while (start <= value.size()) {
+                auto end = value.find(',', start);
+                if (end == std::string_view::npos) end = value.size();
+                auto coding = util::trim(value.substr(start, end - start));
+                if (!util::is_token(coding)) return TransferEncodingStatus::Invalid;
+                ++count;
+                if (!util::iequals(coding, "chunked")) unsupported = true;
+                if (end == value.size()) break;
+                start = end + 1;
+            }
+            if (count == 0 || (count > 1 && !unsupported)) return TransferEncodingStatus::Invalid;
+            return unsupported ? TransferEncodingStatus::Unsupported : TransferEncodingStatus::Supported;
+        }
+
         bool parse_hex(std::string_view s, std::uint64_t& out) {
             if (s.empty() || s.size() > 16) return false;
             std::uint64_t value = 0;
@@ -70,7 +98,15 @@ namespace proxy::http {
                     }
                     i = nl + 1;
                     std::string_view line = line_;
-                    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+                    if (line.empty() || line.back() != '\r') {
+                        fail(ParseError::BadHeader, "HTTP lines must end with CRLF");
+                        return end;
+                    }
+                    line.remove_suffix(1);
+                    if (line.find('\r') != std::string_view::npos) {
+                        fail(ParseError::BadHeader, "unexpected carriage return in HTTP line");
+                        return end;
+                    }
                     handle_line(line);
                     line_.clear();
                     break;
@@ -135,8 +171,16 @@ namespace proxy::http {
                 state_ = State::ChunkSize;
                 return;
             case State::Trailer:
-                // Trailer fields are discarded; an empty line ends the message.
-                if (line.empty()) complete();
+                if (line.empty()) {
+                    complete();
+                } else {
+                    auto colon = line.find(':');
+                    if (colon == std::string_view::npos ||
+                        !util::is_token(line.substr(0, colon)) ||
+                        !valid_field_value(line.substr(colon + 1))) {
+                        fail(ParseError::BadHeader, "invalid trailer field");
+                    }
+                }
                 return;
             default:
                 return;
@@ -163,7 +207,12 @@ namespace proxy::http {
             fail(ParseError::HeadersTooLarge, "too many header fields");
             return;
         }
-        headers_.add(std::string(name), std::string(util::trim(line.substr(colon + 1))));
+        auto value = line.substr(colon + 1);
+        if (!valid_field_value(value)) {
+            fail(ParseError::BadHeader, "invalid control character in header value");
+            return;
+        }
+        headers_.add(std::string(name), std::string(util::trim(value)));
     }
 
     void ParserBase::handle_headers_end() {
@@ -265,21 +314,25 @@ namespace proxy::http {
         saw_bytes_ = false;
     }
 
-    bool ParserBase::body_from_headers(BodySpec& spec, bool is_request) {
-        // RFC 9112 §6.3: Transfer-Encoding overrides Content-Length.
+    bool ParserBase::body_from_headers(BodySpec& spec, bool) {
+        // The proxy only implements the chunked transfer coding. Reject other
+        // codings instead of silently exposing still-encoded bytes as the payload.
         if (headers_.contains("Transfer-Encoding")) {
-            auto codings = headers_.get_tokens("Transfer-Encoding");
-            if (!codings.empty() && codings.back() == "chunked") {
-                spec.mode = BodyMode::Chunked;
-                // Drop Content-Length to avoid request-smuggling ambiguity downstream.
-                headers_.remove("Content-Length");
-                return true;
-            }
-            if (is_request) {
-                fail(ParseError::BadTransferEncoding, "unsupported transfer coding in request");
+            if (headers_.contains("Content-Length")) {
+                fail(ParseError::BadTransferEncoding, "Transfer-Encoding with Content-Length is ambiguous");
                 return false;
             }
-            spec.mode = BodyMode::UntilClose;
+            const std::string transfer_encoding = headers_.get_combined("Transfer-Encoding");
+            const auto transfer_status = parse_transfer_encoding(transfer_encoding);
+            if (transfer_status == TransferEncodingStatus::Invalid) {
+                fail(ParseError::BadTransferEncoding, "malformed Transfer-Encoding");
+                return false;
+            }
+            if (transfer_status == TransferEncodingStatus::Unsupported) {
+                fail(ParseError::UnsupportedTransferEncoding, "unsupported Transfer-Encoding");
+                return false;
+            }
+            spec.mode = BodyMode::Chunked;
             return true;
         }
 
@@ -326,7 +379,11 @@ namespace proxy::http {
         auto target = line.substr(sp1 + 1, sp2 - sp1 - 1);
         auto version = line.substr(sp2 + 1);
 
-        if (!util::is_token(method) || target.empty()) {
+        bool invalid_target = target.empty();
+        for (unsigned char c : target) {
+            if (c <= 0x20 || c == 0x7f) invalid_target = true;
+        }
+        if (!util::is_token(method) || invalid_target) {
             fail(ParseError::BadStartLine, "malformed request line");
             return false;
         }
@@ -343,6 +400,13 @@ namespace proxy::http {
         if (version_.minor >= 1 && !headers_.contains("Host")) {
             fail(ParseError::BadHeader, "missing Host header");
             return HeadersAction::Fail;
+        }
+        if (headers_.contains("Expect")) {
+            const std::string expect = headers_.get_combined("Expect");
+            if (version_.minor < 1 || !util::iequals(util::trim(expect), "100-continue")) {
+                fail(ParseError::ExpectationFailed, "unsupported expectation");
+                return HeadersAction::Fail;
+            }
         }
         return body_from_headers(spec, true) ? HeadersAction::Continue : HeadersAction::Fail;
     }
@@ -380,7 +444,12 @@ namespace proxy::http {
             return false;
         }
         status_code_ = static_cast<int>(status);
-        reason_ = line.size() > 13 ? std::string(line.substr(13)) : std::string();
+        auto reason = line.size() > 13 ? line.substr(13) : std::string_view{};
+        if (!valid_field_value(reason)) {
+            fail(ParseError::BadStartLine, "invalid control character in reason phrase");
+            return false;
+        }
+        reason_ = std::string(reason);
         return true;
     }
 
@@ -388,6 +457,22 @@ namespace proxy::http {
         // Interim responses (100 Continue, 103 Early Hints...) are skipped.
         if (status_code_ >= 100 && status_code_ < 200 && status_code_ != 101) {
             return HeadersAction::Interim;
+        }
+        if (status_code_ == 205) {
+            if (headers_.contains("Transfer-Encoding")) {
+                fail(ParseError::BadTransferEncoding, "205 response must not contain a transfer coding");
+                return HeadersAction::Fail;
+            }
+            if (headers_.contains("Content-Length")) {
+                BodySpec framing;
+                if (!body_from_headers(framing, false)) return HeadersAction::Fail;
+                if (framing.mode != BodyMode::Fixed || framing.length != 0) {
+                    fail(ParseError::BadContentLength, "205 response must have an empty body");
+                    return HeadersAction::Fail;
+                }
+            }
+            spec.mode = BodyMode::None;
+            return HeadersAction::Continue;
         }
         if (response_has_no_body(request_method_, status_code_)) {
             spec.mode = BodyMode::None;

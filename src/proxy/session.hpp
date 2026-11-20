@@ -3,6 +3,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -19,6 +20,8 @@
 
 namespace proxy {
 
+    class Tunnel;
+
     // One client connection. Reads requests (keep-alive and pipelining aware),
     // answers from the cache or forwards them upstream, and turns into a Tunnel
     // on CONNECT.
@@ -32,6 +35,10 @@ namespace proxy {
         ~Session();
 
         void start();
+        void shutdown();
+        void set_tunnel_handler(std::function<void(std::shared_ptr<Tunnel>)> handler) {
+            tunnel_handler_ = std::move(handler);
+        }
 
     private:
         void do_read();
@@ -72,6 +79,8 @@ namespace proxy {
         std::chrono::steady_clock::time_point started_;
         std::string write_buffer_;
         std::shared_ptr<UpstreamExchange> upstream_;
+        bool shutting_down_ = false;
+        std::function<void(std::shared_ptr<Tunnel>)> tunnel_handler_;
 
         // CONNECT handling.
         std::unique_ptr<boost::asio::ip::tcp::resolver> resolver_;

@@ -33,8 +33,9 @@ int main(int argc, char** argv) {
         boost::asio::signal_set signals(io, SIGINT, SIGTERM);
         signals.async_wait([&](const boost::system::error_code&, int sig) {
             LOG_INFO("received signal " << sig << ", shutting down");
+            boost::system::error_code ignored;
+            signals.cancel(ignored);
             server.stop();
-            io.stop();
         });
 
         auto ep = server.local_endpoint();

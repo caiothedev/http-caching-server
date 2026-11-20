@@ -17,9 +17,13 @@ Um servidor proxy HTTP com sistema de cache desenvolvido em C++ como projeto de 
 
 ## Funcionalidades
 
-- **GET / POST / PUT / DELETE / ...**: encaminhamento de requisições em *absolute-form* (`GET http://host/path HTTP/1.1`) para a origem, convertidas para *origin-form*
-- **CONNECT**: túnel TCP bidirecional (HTTPS), com half-close e timeout de inatividade; as portas permitidas são configuráveis (padrão: 443)
-- **Parser HTTP/1.1 próprio**, incremental: `Content-Length`, `Transfer-Encoding: chunked`, corpo até o fechamento da conexão, respostas 1xx, pipelining, limites de tamanho
+- **GET / POST / PUT / DELETE / ...**: requisições em formato absoluto (`GET http://host/path HTTP/1.1`) são encaminhadas para a origem no formato de origem (*origin form*)
+- **CONNECT**: túnel TCP bidirecional (HTTPS) com fechamento parcial (*half-close*) e tempo limite de inatividade (*idle timeout*); as portas permitidas são configuráveis ​​(padrão: 443)
+- **Analisador (*parser*) HTTP/1.1 incremental implementado manualmente**: suporta `Content-Length`, codificação por blocos (*chunked encoding*), corpos lidos até o fechamento da conexão, respostas intermediárias (1xx), *pipelining*, validação rigorosa de CRLF/cabeçalhos e limites de tamanho
+- O suporte a codificações de transferência (*transfer coding*) é intencionalmente limitado apenas ao tipo `chunked`; combinações de `Transfer-Encoding` não suportadas ou ambíguas são rejeitadas
+- O cabeçalho `Expect` suporta apenas o valor `100-continue`; outras expectativas resultam em um erro `417 Expectation Failed`
+- Atualizações de protocolo HTTP (`101 Switching Protocols` / `Upgrade`) não são suportadas e são explicitamente rejeitadas
+- Respostas do tipo `205 Reset Content` são validadas como não contendo corpo e são estruturadas com `Content-Length: 0`
 - **Cache em memória (RFC 9111)**:
   - LRU limitado por bytes, com tamanho máximo por objeto
   - `Cache-Control` (`max-age`, `s-maxage`, `no-store`, `no-cache`, `private`, `public`, `must-revalidate`, `max-stale`, `min-fresh`, `only-if-cached`), `Expires`, `Pragma: no-cache`
@@ -29,6 +33,7 @@ Um servidor proxy HTTP com sistema de cache desenvolvido em C++ como projeto de 
   - Header `X-Cache: HIT | MISS | REVALIDATED` nas respostas
 - Keep-alive com o cliente, `Expect: 100-continue`, remoção de headers *hop-by-hop*, `Via`, detecção de loop
 - Timeouts de upstream, de cliente ocioso e de túnel
+- Encerramento gracioso via SIGINT/SIGTERM: interromper o aceite de novos clientes, concluir respostas HTTP em andamento e fechar túneis CONNECT ativos
 - Endpoint de estatísticas: `GET /__proxy/stats` (JSON)
 
 ## Build

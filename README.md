@@ -19,7 +19,11 @@ An HTTP proxy server with a caching system, developed in C++ as a study project,
 
 - **GET / POST / PUT / DELETE / ...**: absolute-form requests (`GET http://host/path HTTP/1.1`) are forwarded to the origin in origin form
 - **CONNECT**: bidirectional TCP tunnel (HTTPS) with half-close and an idle timeout; allowed ports are configurable (default 443)
-- **Hand-written incremental HTTP/1.1 parser**: `Content-Length`, chunked encoding, read-until-close bodies, 1xx responses, pipelining, size limits
+- **Hand-written incremental HTTP/1.1 parser**: `Content-Length`, chunked encoding, read-until-close bodies, interim 1xx responses, pipelining, strict CRLF/header validation, size limits
+- Transfer coding support is intentionally limited to a single `chunked` coding; unsupported or ambiguous `Transfer-Encoding` combinations are rejected
+- `Expect` supports only `100-continue`; other expectations receive `417 Expectation Failed`
+- HTTP protocol upgrades (`101 Switching Protocols` / `Upgrade`) are not supported and are rejected explicitly
+- `205 Reset Content` responses are validated as bodyless and framed with `Content-Length: 0`
 - **In-memory cache (RFC 9111)**:
   - Byte-bounded LRU with a per-object size limit
   - `Cache-Control` (`max-age`, `s-maxage`, `no-store`, `no-cache`, `private`, `public`, `must-revalidate`, `max-stale`, `min-fresh`, `only-if-cached`), `Expires`, `Pragma: no-cache`
@@ -29,6 +33,7 @@ An HTTP proxy server with a caching system, developed in C++ as a study project,
   - `X-Cache: HIT | MISS | REVALIDATED` response header
 - Client keep-alive, `Expect: 100-continue`, hop-by-hop header removal, `Via`, loop detection
 - Upstream, idle-client and tunnel timeouts
+- Graceful SIGINT/SIGTERM shutdown: stop accepting new clients, finish in-flight HTTP responses, and close active CONNECT tunnels
 - Statistics endpoint: `GET /__proxy/stats` (JSON)
 
 ## Build

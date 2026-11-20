@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -11,6 +13,9 @@
 #include "proxy/config.hpp"
 
 namespace proxy {
+
+    class Session;
+    class Tunnel;
 
     struct ProxyStats {
         std::atomic<std::uint64_t> connections{0};
@@ -46,6 +51,10 @@ namespace proxy {
         boost::asio::io_context& io_;
         boost::asio::ip::tcp::acceptor acceptor_;
         std::shared_ptr<ProxyContext> ctx_;
+        std::mutex mutex_;
+        bool stopping_ = false;
+        std::vector<std::weak_ptr<Session>> sessions_;
+        std::vector<std::weak_ptr<Tunnel>> tunnels_;
     };
 
 }  // namespace proxy

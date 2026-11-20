@@ -4,6 +4,7 @@
 #include <sstream>
 
 #include <boost/asio/connect.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/write.hpp>
 
 #include "cache/cache_control.hpp"
@@ -58,6 +59,19 @@ namespace proxy {
         do_read();
     }
 
+    void Session::shutdown() {
+        auto self = shared_from_this();
+        asio::post(client_.get_executor(), [self] {
+            if (self->closed_ || self->shutting_down_) return;
+            self->shutting_down_ = true;
+            self->keep_alive_ = false;
+            // Let an upstream exchange or response write finish; otherwise this
+            // connection is idle/partial and can be closed immediately.
+            if (self->upstream_ || !self->write_buffer_.empty()) return;
+            self->close();
+        });
+    }
+
     // ---------------------------------------------------------------------------
     // Reading and parsing
     // ---------------------------------------------------------------------------
@@ -94,6 +108,8 @@ namespace proxy {
                     case http::ParseError::HeadersTooLarge: status = 431; break;
                     case http::ParseError::BodyTooLarge: status = 413; break;
                     case http::ParseError::BadVersion: status = 505; break;
+                    case http::ParseError::UnsupportedTransferEncoding: status = 501; break;
+                    case http::ParseError::ExpectationFailed: status = 417; break;
                     default: break;
                 }
                 LOG_WARN("[" << id_ << "] bad request from " << peer_ << ": " << parser_.error_message());
@@ -142,6 +158,11 @@ namespace proxy {
         if (req.method == "CONNECT") {
             current_ = std::move(req);
             return handle_connect(current_);
+        }
+        if (req.headers.contains("Upgrade") || req.headers.has_token("Connection", "upgrade")) {
+            current_ = std::move(req);
+            keep_alive_ = false;
+            return send_error(501, "HTTP protocol upgrades are not supported");
         }
 
         url_ = http::parse_absolute_url(req.target);
@@ -272,6 +293,12 @@ namespace proxy {
         http::Response& resp = result.response;
         auto& cache = ctx_->cache;
 
+        if (resp.status == 101) {
+            LOG_WARN("[" << id_ << "] upstream attempted unsupported protocol upgrade");
+            keep_alive_ = false;
+            return send_error(502, "upstream protocol upgrade is not supported");
+        }
+
         if (stale && resp.status == 304) {
             auto entry = cache.refresh(cache_key_, stale, current_, resp, request_time_, response_time);
             return serve_entry(entry, "REVALIDATED");
@@ -317,7 +344,11 @@ namespace proxy {
         if (!http::response_has_no_body(current_.method, resp.status)) {
             resp.headers.set("Content-Length", std::to_string(resp.body.size()));
         } else {
-            if (current_.method != "HEAD") resp.headers.remove("Content-Length");
+            if (resp.status == 205) {
+                resp.headers.set("Content-Length", "0");
+            } else if (current_.method != "HEAD") {
+                resp.headers.remove("Content-Length");
+            }
             resp.body.clear();
         }
         append_via(resp.headers);
@@ -355,7 +386,7 @@ namespace proxy {
             LOG_DEBUG("[" << id_ << "] write error: " << ec.message());
             return close();
         }
-        if (!keep_alive_) return close();
+        if (!keep_alive_ || shutting_down_) return close();
         deadline_.extend(ctx_->config.client_idle_timeout);
         process();  // there may already be a pipelined request in `pending_`
     }
@@ -418,6 +449,7 @@ namespace proxy {
         ctx_->stats.tunnels++;
         auto tunnel = std::make_shared<Tunnel>(std::move(client_), std::move(*tunnel_socket_),
                                             ctx_->config.tunnel_idle_timeout, id_);
+        if (tunnel_handler_) tunnel_handler_(tunnel);
         tunnel->start(std::move(pending_));
     }
 
