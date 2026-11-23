@@ -296,6 +296,13 @@ TEST_CASE("includes the Expectation Failed reason phrase", "[message]") {
     CHECK(reason_phrase(417) == "Expectation Failed");
 }
 
+TEST_CASE("every status the proxy generates has a reason phrase", "[message]") {
+    for (int status : {200, 400, 403, 413, 417, 431, 501, 502, 504, 505, 508}) {
+        INFO("status " << status);
+        CHECK(reason_phrase(status) != "Unknown");
+    }
+}
+
 TEST_CASE("serializes messages", "[message]") {
     Response resp;
     resp.status = 404;

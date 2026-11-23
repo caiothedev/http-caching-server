@@ -227,6 +227,29 @@ TEST_CASE("304 responses refresh the stored entry", "[http-cache]") {
     CHECK(cache.stats().revalidations == 1);
 }
 
+TEST_CASE("304 refresh does not reuse the stored Age header", "[http-cache]") {
+    HttpCache cache;
+    auto req = get_request();
+    auto resp = ok_response("max-age=120");
+    resp.headers.add("ETag", "\"v1\"");
+    resp.headers.add("Age", "100");  // the origin's copy was already 100 s old
+    REQUIRE(cache.store(kKey, req, resp, kT0, kT0));
+
+    auto later = kT0 + 200s;
+    auto stale = cache.lookup(kKey, req, later);
+    REQUIRE(stale.status == LookupStatus::NeedsValidation);
+
+    http::Response not_modified;
+    not_modified.status = 304;
+    not_modified.headers.add("Date", http::format_http_date(later));
+
+    auto refreshed = cache.refresh(kKey, stale.entry, req, not_modified, later, later);
+    REQUIRE(refreshed);
+    // The 304 has no Age, so the validated response is brand new.
+    CHECK(refreshed->current_age(later).count() == 0);
+    CHECK(cache.lookup(kKey, req, later + 60s).status == LookupStatus::Fresh);
+}
+
 TEST_CASE("size limits and LRU eviction", "[http-cache]") {
     cache::CacheOptions options;
     options.max_bytes = 2000;

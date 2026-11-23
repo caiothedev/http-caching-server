@@ -33,6 +33,10 @@ TEST_CASE("rejects invalid dates", "[date]") {
     CHECK_FALSE(parse_http_date("Sun, 06 Foo 1994 08:49:37 GMT"));
     CHECK_FALSE(parse_http_date("Sun, 32 Nov 1994 08:49:37 GMT"));
     CHECK_FALSE(parse_http_date("Sun, 06 Nov 1994 25:49:37 GMT"));
+    // Day numbers that do not exist in the given month.
+    CHECK_FALSE(parse_http_date("Thu, 31 Apr 2025 08:49:37 GMT"));
+    CHECK_FALSE(parse_http_date("Sat, 29 Feb 2025 08:49:37 GMT"));
+    CHECK(parse_http_date("Thu, 29 Feb 2024 08:49:37 GMT"));
 }
 
 TEST_CASE("formats IMF-fixdate and round-trips", "[date]") {

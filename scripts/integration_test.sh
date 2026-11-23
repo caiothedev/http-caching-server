@@ -115,11 +115,19 @@ SERVER_PID=$!
 "$PROXY_BIN" --listen 127.0.0.1 --port "$PROXY_PORT" --threads 2 --timeout 3 --max-connections 2 \
     --connect-ports "$ECHO_PORT" --log-level debug > "$WORK_DIR/proxy.log" 2>&1 &
 PROXY_PID=$!
-for _ in $(seq 1 60); do
-    curl --noproxy '' -sS --max-time 1 "$PROXY/__proxy/stats" >/dev/null 2>&1 && break
-    sleep 0.1
-done
-curl --noproxy '' -sS --max-time 2 "$PROXY/__proxy/stats" >/dev/null || fail "proxy did not start"
+# Wait for every listener: a fast proxy build is otherwise ready before the
+# Python origin, and the first request gets a 502 (connection refused).
+wait_for() {
+    for _ in $(seq 1 100); do
+        "$@" >/dev/null 2>&1 && return 0
+        sleep 0.1
+    done
+    return 1
+}
+wait_for curl --noproxy '' -sS --max-time 1 -o /dev/null "$ORIGIN/" || fail "origin did not start"
+wait_for python3 -c 'import socket, sys; socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=1).close()' \
+    "$ECHO_PORT" || fail "echo server did not start"
+wait_for curl --noproxy '' -sS --max-time 1 "$PROXY/__proxy/stats" || fail "proxy did not start"
 pcurl() { curl --noproxy '' -sS --max-time 10 -x "$PROXY" "$@"; }
 
 echo "1. conditional revalidation with 304"
@@ -161,7 +169,7 @@ def response():
     data = bytearray()
     while b"\r\n\r\n" not in data:
         data.extend(sock.recv(4096))
-    head, body = data.split(b"\r\n\r\n", 1)
+    head, body = bytes(data).split(b"\r\n\r\n", 1)
     headers = {}
     for line in head.split(b"\r\n")[1:]:
         if b":" in line:
@@ -215,10 +223,8 @@ fi
 "$PROXY_BIN" --listen 127.0.0.1 --port "$NOCACHE_PROXY_PORT" --threads 2 --timeout 3 \
     --no-cache --log-level debug > "$WORK_DIR/no-cache-proxy.log" 2>&1 &
 NOCACHE_PROXY_PID=$!
-for _ in $(seq 1 60); do
-    curl --noproxy '' -sS --max-time 1 "http://127.0.0.1:$NOCACHE_PROXY_PORT/__proxy/stats" >/dev/null 2>&1 && break
-    sleep 0.1
-done
+wait_for curl --noproxy '' -sS --max-time 1 "http://127.0.0.1:$NOCACHE_PROXY_PORT/__proxy/stats" \
+    || fail "--no-cache proxy did not start"
 status="$(curl --noproxy '' -sS --max-time 5 -x "http://127.0.0.1:$NOCACHE_PROXY_PORT" \
     -H 'Cache-Control: only-if-cached' -o /dev/null -w '%{http_code}' "$ORIGIN/only-if-cached")"
 [[ "$status" == "504" ]] || fail "only-if-cached with --no-cache returned $status instead of 504"

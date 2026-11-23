@@ -140,6 +140,7 @@ namespace proxy::http {
             case 503: return "Service Unavailable";
             case 504: return "Gateway Timeout";
             case 505: return "HTTP Version Not Supported";
+            case 508: return "Loop Detected";
             default: return "Unknown";
         }
     }

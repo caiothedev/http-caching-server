@@ -55,8 +55,15 @@ namespace proxy::http {
             return digits(s.substr(0, 2), h) && digits(s.substr(3, 2), mi) && digits(s.substr(6, 2), se);
         }
 
+        int days_in_month(int year, int month) {
+            static constexpr int kMonthDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+            bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+            return month == 2 && leap ? 29 : kMonthDays[month - 1];
+        }
+
         std::optional<Clock::time_point> build(int year, int month, int day, int h, int mi, int se) {
-            if (month < 1 || month > 12 || day < 1 || day > 31 || h > 23 || mi > 59 || se > 60) {
+            if (month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) || h > 23 || mi > 59 ||
+                se > 60) {
                 return std::nullopt;
             }
             auto days = days_from_civil(year, static_cast<unsigned>(month), static_cast<unsigned>(day));

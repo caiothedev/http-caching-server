@@ -28,7 +28,7 @@ namespace proxy {
         << "      --cache-size MB      total cache size in MiB (default 64)\n"
         << "      --max-object MB      largest cacheable response in MiB (default 8)\n"
         << "      --max-connections N  maximum simultaneous clients (default 16)\n"
-        << "      --max-body MB       maximum request/response body in MiB (default 8)\n"
+        << "      --max-body MB        maximum request/response body in MiB (default 8)\n"
         << "      --no-cache           disable the cache (pure forwarding proxy)\n"
         << "      --timeout SEC        upstream total and inactivity timeout (default 30)\n"
         << "      --idle-timeout SEC   idle keep-alive client timeout (default 60)\n"

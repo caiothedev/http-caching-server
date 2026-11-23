@@ -219,6 +219,9 @@ namespace proxy::cache {
                                 const http::Response& not_modified, Clock::time_point request_time,
                                 Clock::time_point response_time) {
         http::Response merged = stale->response;
+        // The stored Age described the original response. The 304 is a new
+        // response, so its own Age (or none) is what counts from here on.
+        merged.headers.remove("Age");
 
         // RFC 9111 §3.2: header fields in the 304 replace the stored ones, except
         // framing fields that describe the (absent) 304 body.
