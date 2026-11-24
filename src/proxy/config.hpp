@@ -9,6 +9,7 @@
 
 #include "cache/http_cache.hpp"
 #include "http/parser.hpp"
+#include "proxy/access.hpp"
 #include "util/logger.hpp"
 
 namespace proxy {
@@ -23,8 +24,14 @@ namespace proxy {
         std::chrono::seconds client_idle_timeout{60};
         std::chrono::seconds tunnel_idle_timeout{300};
 
+        std::size_t pool_size = 32;
+        std::chrono::seconds pool_idle_timeout{15};
+
         // Ports CONNECT may reach. Empty = any port (not recommended).
         std::vector<std::uint16_t> connect_ports{443};
+
+        // Destinations that may be contacted (forwarding and CONNECT).
+        AccessPolicy access;
 
         bool cache_enabled = true;
         cache::CacheOptions cache;

@@ -113,10 +113,14 @@ Each request produces one log line:
 | `--cache-size MB` | `64` | total cache size in MiB |
 | `--max-object MB` | `8` | largest cacheable response in MiB |
 | `--no-cache` | — | disables the cache (pure forwarding proxy) |
-| `--timeout SEC` | `30` | upstream connect/read timeout |
+| `--timeout SEC` | `30` | limit for the origin's response headers and for each wait for origin data |
+| `--pool-size N` | `32` | idle keep-alive connections kept to origins (`0` disables reuse) |
+| `--pool-idle-timeout SEC` | `15` | how long an idle origin connection is kept |
 | `--idle-timeout SEC` | `60` | idle keep-alive client timeout |
 | `--tunnel-timeout SEC` | `300` | idle CONNECT tunnel timeout |
 | `--connect-ports LIST` | `443` | comma-separated ports allowed for CONNECT, or `any` |
+| `--allow-hosts LIST` | any | destination hosts allowed (`*.example.com` matches subdomains) |
+| `--block-private` | — | refuses loopback/private/link-local destinations |
 | `--log-level LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `-h, --help` | — | shows the help |
 
@@ -128,7 +132,7 @@ Example:
 ./build/http_proxy --port 3128 --threads 4 --cache-size 256 --max-object 16 --log-level debug
 ```
 
-> **Security:** `--listen 0.0.0.0` exposes the proxy to the whole network. There is no authentication: anyone who can reach the port can use it as an open proxy. Only do this on trusted networks.
+> **Security:** `--listen 0.0.0.0` exposes the proxy to the whole network. There is no authentication: anyone who can reach the port can use it as an open proxy. Only do this on trusted networks. Restrict destinations with `--allow-hosts` and `--block-private`.
 
 ## 5. Using the proxy
 
@@ -186,6 +190,13 @@ curl http://127.0.0.1:8080/__proxy/stats
   "requests": 20,
   "tunnels": 2,
   "upstream_errors": 0,
+  "client_aborts": 0,
+  "blocked_requests": 0,
+  "rejected_connections": 0,
+  "upstream_pool": {
+    "idle": 1,
+    "reused": 7
+  },
   "cache": {
     "enabled": true,
     "entries": 5,
@@ -206,11 +217,12 @@ curl http://127.0.0.1:8080/__proxy/stats
 | Status | When |
 | --- | --- |
 | `400` | malformed request, target that is not an absolute `http://` URL, or CONNECT without `host:port` |
-| `403` | CONNECT to a port not in `--connect-ports` |
+| `403` | CONNECT to a port not in `--connect-ports`, or destination refused by `--allow-hosts` / `--block-private` |
+| `503` | the `--max-connections` limit has been reached |
 | `413` | body larger than the limit |
 | `431` | headers larger than 64 KiB or more than 100 header fields |
 | `502` | origin does not resolve, refuses the connection or sends an invalid response |
-| `504` | upstream timeout, or `only-if-cached` with nothing in the cache |
+| `504` | origin headers did not arrive within `--timeout`, or `only-if-cached` with nothing in the cache |
 | `505` | unsupported HTTP version |
 | `508` | loop detected (the request already went through this proxy) |
 
@@ -238,6 +250,10 @@ Or run the Catch2 executable directly, which lets you filter by name or tag:
 | `tests/test_lru_cache.cpp` | cost-bounded LRU, eviction |
 | `tests/test_cache_control.cpp` | `Cache-Control` directive parsing |
 | `tests/test_http_cache.cpp` | RFC 9111 policy: storage, freshness, revalidation, `Vary` |
+| `tests/test_config.cpp` | command-line parsing and validation |
+| `tests/test_access.cpp` | non-public address ranges and host allowlist matching |
+| `tests/test_upstream_pool.cpp` | idle connection reuse, closed/dirty connection detection, expiry and size bound |
+| `tests/test_proxy.cpp` | the running proxy end to end: cache, revalidation, pipelining, `100-continue`, client abort, `503`, access policy, CONNECT, graceful shutdown, streaming (large, chunked, close-delimited, backpressure, cached while streaming), connection pool and retry |
 
 ### Smoke test (end to end)
 

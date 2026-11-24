@@ -18,25 +18,29 @@ namespace proxy {
     std::string usage(const char* program) {
         std::ostringstream os;
         os << "Usage: " << program << " [options]\n"
-        << "\n"
-        << "HTTP/1.1 caching proxy (GET/POST/... forwarding, CONNECT tunnelling).\n"
-        << "\n"
-        << "Options:\n"
-        << "  -l, --listen ADDR        address to bind (default 127.0.0.1)\n"
-        << "  -p, --port N             port to listen on (default 8080)\n"
-        << "  -t, --threads N          worker threads (default: number of CPUs)\n"
-        << "      --cache-size MB      total cache size in MiB (default 64)\n"
-        << "      --max-object MB      largest cacheable response in MiB (default 8)\n"
-        << "      --max-connections N  maximum simultaneous clients (default 16)\n"
-        << "      --max-body MB        maximum request/response body in MiB (default 8)\n"
-        << "      --no-cache           disable the cache (pure forwarding proxy)\n"
-        << "      --timeout SEC        upstream total and inactivity timeout (default 30)\n"
-        << "      --idle-timeout SEC   idle keep-alive client timeout (default 60)\n"
-        << "      --tunnel-timeout SEC idle CONNECT tunnel timeout (default 300)\n"
-        << "      --connect-ports LIST comma separated ports allowed for CONNECT,\n"
-        << "                           or 'any' (default 443)\n"
-        << "      --log-level LEVEL    debug | info | warn | error (default info)\n"
-        << "  -h, --help               show this help\n";
+            << "\n"
+            << "HTTP/1.1 caching proxy (GET/POST/... forwarding, CONNECT tunnelling).\n"
+            << "\n"
+            << "Options:\n"
+            << "  -l, --listen ADDR        address to bind (default 127.0.0.1)\n"
+            << "  -p, --port N             port to listen on (default 8080)\n"
+            << "  -t, --threads N          worker threads (default: number of CPUs)\n"
+            << "      --cache-size MB      total cache size in MiB (default 64)\n"
+            << "      --max-object MB      largest cacheable response in MiB (default 8)\n"
+            << "      --max-connections N  maximum simultaneous clients (default 16)\n"
+            << "      --max-body MB        maximum request/response body in MiB (default 8)\n"
+            << "      --no-cache           disable the cache (pure forwarding proxy)\n"
+            << "      --timeout SEC        upstream total and inactivity timeout (default 30)\n"
+            << "      --idle-timeout SEC   idle keep-alive client timeout (default 60)\n"
+            << "      --tunnel-timeout SEC idle CONNECT tunnel timeout (default 300)\n"
+            << "      --pool-size N        idle keep-alive connections kept to origins,\n"
+            << "                           0 disables reuse (default 32)\n"
+            << "      --pool-idle-timeout SEC\n"
+            << "                           how long an idle origin connection is kept (default 15)\n"
+            << "      --connect-ports LIST comma separated ports allowed for CONNECT,\n"
+            << "                           or 'any' (default 443)\n"
+            << "      --log-level LEVEL    debug | info | warn | error (default info)\n"
+            << "  -h, --help               show this help\n";
         return os.str();
     }
 
@@ -115,6 +119,24 @@ namespace proxy {
                     }
                     if (cfg.connect_ports.empty()) return error("invalid --connect-ports");
                 }
+            } else if (arg == "--pool-size") {
+                if (!next() || !parse_number(value, 0, 1024, n)) return error("invalid --pool-size");
+                cfg.pool_size = static_cast<std::size_t>(n);
+            } else if (arg == "--pool-idle-timeout") {
+                if (!next() || !parse_number(value, 1, 3600, n)) return error("invalid --pool-idle-timeout");
+                cfg.pool_idle_timeout = std::chrono::seconds(n);
+            } else if (arg == "--allow-hosts") {
+                if (!next()) return error("missing value for --allow-hosts");
+                cfg.access.allowed_hosts.clear();
+                for (auto item : util::split_list(value)) {
+                    std::string pattern;
+                    if (!parse_host_pattern(item, pattern))
+                        return error("invalid --allow-hosts entry: " + std::string(item));
+                    cfg.access.allowed_hosts.push_back(std::move(pattern));
+                }
+                if (cfg.access.allowed_hosts.empty()) return error("invalid --allow-hosts");
+            } else if (arg == "--block-private") {
+                cfg.access.block_private = true;
             } else if (arg == "--log-level") {
                 if (!next()) return error("missing value for --log-level");
                 auto level = log::parse_level(value);

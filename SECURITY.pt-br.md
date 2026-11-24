@@ -18,7 +18,6 @@ Atualmente, o proxy não possui:
 - Lista de controle de acesso por usuário ou endereço IP.
 - Autorização por cliente, cotas ou limitação de taxa.
 - Terminação TLS na conexão entre cliente e proxy.
-- Lista de hosts ou endereços IP de destino permitidos para o encaminhamento HTTP comum.
 
 Qualquer pessoa capaz de se conectar a um listener exposto pode enviar requisições através do proxy. Não o exponha diretamente à internet pública ou a uma rede não confiável.
 
@@ -28,7 +27,13 @@ O acesso HTTPS pelo proxy utiliza o método HTTP `CONNECT` para estabelecer um t
 
 Use `--connect-ports` para configurar as portas de destino permitidas. O valor especial `any` remove a restrição de portas e não é recomendado para um serviço exposto.
 
-A restrição de portas não é uma lista de destinos permitidos: ela não restringe nomes de host nem endereços IP de destino. Implantações que exigem controle de tráfego de saída devem aplicá-lo fora desta aplicação, por exemplo, com um firewall ou uma rede isolada.
+A restrição de portas não é uma lista de destinos permitidos: ela não restringe nomes de host nem endereços IP de destino.
+
+## Política de acesso a destinos
+
+`--allow-hosts` limita o encaminhamento e o CONNECT aos hosts listados (`*.example.com` cobre subdomínios). `--block-private` recusa destinos cujos endereços resolvidos sejam de loopback, privados, link-local (incluindo os metadados de nuvem em `169.254.169.254`), CGNAT, multicast ou não públicos de outra forma; a verificação acontece após a resolução DNS e o proxy só conecta nos endereços aprovados, o que mitiga *server-side request forgery* (SSRF) contra serviços internos. As duas opções vêm desativadas por padrão. Elas complementam, e não substituem, regras de firewall de saída ou uma rede isolada.
+
+Clientes além de `--max-connections` recebem `503 Service Unavailable`; no máximo 64 dessas respostas ficam em andamento ao mesmo tempo, e conexões adicionais são fechadas imediatamente.
 
 Depois que o túnel é estabelecido, o proxy retransmite os bytes e não inspeciona nem armazena em cache o tráfego criptografado da aplicação.
 
@@ -42,7 +47,7 @@ Depois que o túnel é estabelecido, o proxy retransmite os bytes e não inspeci
 
 ## Parser e limites de recursos
 
-O parser HTTP impõe limites ao tamanho dos cabeçalhos, à quantidade de campos de cabeçalho e ao tamanho do corpo da mensagem. Os padrões são 64 KiB para a linha inicial mais os cabeçalhos, 100 campos de cabeçalho e 8 MiB para corpos de requisições/respostas. O limite padrão é de 16 clientes simultâneos, incluindo túneis CONNECT. O produto configurado de `--max-connections` por `--max-body` não pode exceder 128 MiB. Valores fixos de `Content-Length` são verificados sem reservar antecipadamente todo o corpo declarado antes da chegada dos bytes.
+O parser HTTP impõe limites ao tamanho dos cabeçalhos, à quantidade de campos de cabeçalho e ao tamanho do corpo da mensagem. Os padrões são 64 KiB para a linha inicial mais os cabeçalhos, 100 campos de cabeçalho e 8 MiB para corpos de requisição; corpos de resposta são transmitidos em streaming com *backpressure*, então o tamanho deles não vira memória do proxy (apenas a cópia mantida para o cache, até `--max-object`, por conexão). O limite padrão é de 16 clientes simultâneos, incluindo túneis CONNECT. O produto configurado de `--max-connections` por `--max-body` não pode exceder 128 MiB. Valores fixos de `Content-Length` são verificados sem reservar antecipadamente todo o corpo declarado antes da chegada dos bytes.
 
 O parser rejeita enquadramentos ambíguos com `Transfer-Encoding` e `Content-Length` simultâneos, enquadramentos malformados, codificações de transferência não suportadas e atualizações de protocolo não suportadas. Somente a codificação de transferência `chunked` é implementada. Essas verificações reduzem ambiguidades de interpretação, mas não substituem o isolamento de rede nem uma revisão de segurança.
 
@@ -52,7 +57,8 @@ O cache possui capacidade total e tamanho máximo por objeto configuráveis. Os 
 
 - Mantenha o listener em `127.0.0.1`, a menos que o acesso remoto seja explicitamente necessário.
 - Se o acesso remoto for necessário, coloque o proxy atrás de uma fronteira de rede confiável e aplique autenticação, autorização e controles de acesso à rede externamente.
-- Restrinja o tráfego de saída com regras de firewall; não confie em `--connect-ports` como uma lista de hosts ou IPs permitidos.
+- Ative `--block-private`, e `--allow-hosts` quando o conjunto de destinos for conhecido, em qualquer listener alcançável por clientes não confiáveis.
+- Restrinja também o tráfego de saída com regras de firewall; `--connect-ports` sozinho não é uma lista de hosts/IPs permitidos.
 - Mantenha a restrição padrão da porta CONNECT, a menos que outras portas sejam necessárias.
 - Configure `--cache-size` e `--max-object` de acordo com a memória disponível e o tráfego esperado.
 - Proteja os logs e evite registrar ou compartilhar URLs que contenham credenciais ou tokens privados.

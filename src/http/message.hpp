@@ -69,6 +69,7 @@ namespace proxy::http {
     std::string to_string(Version v);
     std::string serialize(const Request& req);
     std::string serialize(const Response& resp);
+    std::string serialize_head(const Response& resp);
     std::string_view reason_phrase(int status);
 
     // True when a response to `request_method` with this status can never carry a body.

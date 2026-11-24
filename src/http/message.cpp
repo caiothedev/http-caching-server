@@ -92,6 +92,19 @@ namespace proxy::http {
         return out;
     }
 
+    std::string serialize_head(const Response& resp) {
+        std::string out;
+        out.reserve(256);
+        out += to_string(resp.version);
+        out += ' ';
+        out += std::to_string(resp.status);
+        out += ' ';
+        out += resp.reason.empty() ? std::string(reason_phrase(resp.status)) : resp.reason;
+        out += "\r\n";
+        append_headers(out, resp.headers);
+        return out;
+    }
+
     std::string serialize(const Response& resp) {
         std::string out;
         out.reserve(256 + resp.body.size());

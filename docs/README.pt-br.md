@@ -113,10 +113,14 @@ Cada requisição gera uma linha de log no formato:
 | `--cache-size MB` | `64` | tamanho total do cache em MiB |
 | `--max-object MB` | `8` | maior resposta que pode ser guardada, em MiB |
 | `--no-cache` | — | desativa o cache (proxy de encaminhamento puro) |
-| `--timeout SEC` | `30` | timeout de conexão/leitura com a origem |
+| `--timeout SEC` | `30` | prazo para os headers da resposta da origem e para cada espera por dados da origem |
+| `--pool-size N` | `32` | conexões keep-alive ociosas mantidas com as origens (`0` desativa o reuso) |
+| `--pool-idle-timeout SEC` | `15` | por quanto tempo uma conexão ociosa com a origem é mantida |
 | `--idle-timeout SEC` | `60` | timeout de um cliente keep-alive ocioso |
 | `--tunnel-timeout SEC` | `300` | timeout de inatividade de um túnel CONNECT |
 | `--connect-ports LIST` | `443` | portas permitidas para CONNECT, separadas por vírgula, ou `any` |
+| `--allow-hosts LIST` | qualquer | hosts de destino permitidos (`*.example.com` cobre subdomínios) |
+| `--block-private` | — | recusa destinos de loopback/privados/link-local |
 | `--log-level LEVEL` | `info` | `debug`, `info`, `warn` ou `error` |
 | `-h, --help` | — | mostra a ajuda |
 
@@ -128,7 +132,7 @@ Exemplo:
 ./build/http_proxy --port 3128 --threads 4 --cache-size 256 --max-object 16 --log-level debug
 ```
 
-> **Segurança:** `--listen 0.0.0.0` expõe o proxy para toda a rede. Não há autenticação: qualquer pessoa que alcance a porta pode usá-lo como proxy aberto. Use apenas em redes confiáveis.
+> **Segurança:** `--listen 0.0.0.0` expõe o proxy para toda a rede. Não há autenticação: qualquer pessoa que alcance a porta pode usá-lo como proxy aberto. Use apenas em redes confiáveis. Restrinja os destinos com `--allow-hosts` e `--block-private`.
 
 ## 5. Usando o proxy
 
@@ -186,6 +190,13 @@ curl http://127.0.0.1:8080/__proxy/stats
   "requests": 20,
   "tunnels": 2,
   "upstream_errors": 0,
+  "client_aborts": 0,
+  "blocked_requests": 0,
+  "rejected_connections": 0,
+  "upstream_pool": {
+    "idle": 1,
+    "reused": 7
+  },
   "cache": {
     "enabled": true,
     "entries": 5,
@@ -206,11 +217,12 @@ curl http://127.0.0.1:8080/__proxy/stats
 | Status | Quando |
 | --- | --- |
 | `400` | requisição malformada, alvo que não é `http://` absoluto, ou CONNECT sem `host:porta` |
-| `403` | CONNECT para uma porta fora de `--connect-ports` |
+| `403` | CONNECT para uma porta fora de `--connect-ports`, ou destino recusado por `--allow-hosts` / `--block-private` |
+| `503` | o limite de `--max-connections` foi atingido |
 | `413` | corpo maior que o limite |
 | `431` | headers maiores que 64 KiB ou mais de 100 headers |
 | `502` | origem não resolve, recusa a conexão ou envia resposta inválida |
-| `504` | timeout com a origem, ou `only-if-cached` sem entrada no cache |
+| `504` | os headers da origem não chegaram dentro de `--timeout`, ou `only-if-cached` sem entrada no cache |
 | `505` | versão HTTP não suportada |
 | `508` | loop detectado (o proxy recebeu uma requisição que já passou por ele) |
 
@@ -238,6 +250,10 @@ Ou diretamente pelo executável do Catch2, que permite filtrar por nome ou tag:
 | `tests/test_lru_cache.cpp` | LRU limitado por custo, evicção |
 | `tests/test_cache_control.cpp` | parsing de diretivas `Cache-Control` |
 | `tests/test_http_cache.cpp` | política RFC 9111: armazenamento, frescor, revalidação, `Vary` |
+| `tests/test_config.cpp` | parsing e validação da linha de comando |
+| `tests/test_access.cpp` | faixas de endereços não públicos e correspondência da lista de hosts |
+| `tests/test_upstream_pool.cpp` | reuso de conexões ociosas, detecção de conexões fechadas/sujas, expiração e limite de tamanho |
+| `tests/test_proxy.cpp` | o proxy rodando de ponta a ponta: cache, revalidação, pipelining, `100-continue`, cliente que desiste, `503`, política de acesso, CONNECT, encerramento gracioso, streaming (grande, chunked, delimitado pelo fechamento, backpressure, cache durante o streaming), pool de conexões e nova tentativa |
 
 ### Smoke test (ponta a ponta)
 

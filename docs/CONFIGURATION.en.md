@@ -46,6 +46,8 @@ Options that take a value accept both forms:
 | `--idle-timeout SEC` | `60` | 1–3600 seconds | Idle client keep-alive timeout. |
 | `--tunnel-timeout SEC` | `300` | 1–86400 seconds | Idle CONNECT tunnel timeout. |
 | `--connect-ports LIST` | `443` | Comma-separated ports 1–65535, or `any` | Destination ports permitted for CONNECT. |
+| `--allow-hosts LIST` | any host | Comma-separated host names, IP literals or `*.domain` wildcards | Destination hosts that may be contacted, for forwarding and CONNECT. Others get `403`. |
+| `--block-private` | disabled | flag | Refuses destinations whose resolved addresses are all loopback, private, link-local, CGNAT, multicast or otherwise non-public (`403`). |
 | `--log-level LEVEL` | `info` | `debug`, `info`, `warn`, `error` | Minimum log severity. |
 | `-h, --help` | — | flag | Prints usage information and exits. |
 
@@ -65,7 +67,7 @@ The HTTP parser defaults are:
 - Maximum header fields: 100.
 - Maximum message body: 8 MiB.
 
-The server admits up to 16 simultaneous client connections by default, including CONNECT tunnels. `--max-connections` and `--max-body` are validated together so their product cannot exceed 128 MiB of configured in-flight message-body capacity. Fixed `Content-Length` values are validated without reserving the full declared body before the payload arrives.
+The server admits up to 16 simultaneous client connections by default, including CONNECT tunnels. A connection over the limit is answered with `503 Service Unavailable` and `Retry-After: 1`, then closed. `--max-connections` and `--max-body` are validated together so their product cannot exceed 128 MiB of configured in-flight message-body capacity. Fixed `Content-Length` values are validated without reserving the full declared body before the payload arrives.
 
 The effective body limit is raised when the configured maximum cache entry is larger than the parser's default body limit. The maximum cache entry size is also clamped to the total cache capacity when it is larger.
 
@@ -85,7 +87,19 @@ To allow any destination port:
 ./build/http_proxy --connect-ports any
 ```
 
-An empty port list is interpreted internally as allowing any port. The `any` setting is not recommended for an exposed proxy. This option restricts ports only; it does not provide a hostname or destination-IP allowlist.
+An empty port list is interpreted internally as allowing any port. The `any` setting is not recommended for an exposed proxy. This option restricts ports only; use `--allow-hosts` and `--block-private` (below) to restrict destination hosts and addresses.
+
+### Destination access policy
+
+`--allow-hosts` restricts which destination hosts can be reached, both for forwarded requests and for CONNECT. Entries are matched case-insensitively against the host in the request; `example.com` matches only that host and `*.example.com` matches any subdomain (but not `example.com` itself, so list both when needed). IP literals can be listed as well (`127.0.0.1`, `::1` or `[::1]`).
+
+```bash
+./build/http_proxy --allow-hosts 'example.com,*.example.com'
+```
+
+`--block-private` refuses destinations that resolve to non-public addresses: loopback (`127.0.0.0/8`, `::1`), private (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`), link-local (`169.254/16`, including cloud metadata endpoints, and `fe80::/10`), CGNAT (`100.64/10`), unspecified, multicast, documentation and other reserved ranges. IPv4 addresses embedded in IPv6 (`::ffff:a.b.c.d`, NAT64, 6to4) are judged as IPv4. The check runs on the addresses returned by DNS, and the proxy connects only to addresses that passed it, so a public name that resolves to an internal address is refused as well. If every address of a destination is refused, the client gets `403`.
+
+Both options are off by default so the proxy keeps working for local development. Enable them whenever the listener is reachable by clients you do not fully trust.
 
 ## 5. Cache configuration
 

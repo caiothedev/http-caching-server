@@ -17,3 +17,4 @@ PointerAlignment: Left
 SpacesBeforeTrailingComments: 2
 IncludeBlocks: Preserve
 SortIncludes: CaseSensitive
+NamespaceIndentation: All

@@ -111,6 +111,8 @@ O LRU acompanha bytes estimados, incluindo o corpo, o motivo da resposta, os nom
 
 O tamanho máximo por objeto é limitado à capacidade total durante a configuração.
 
+Respostas que ainda estão chegando quando seus headers são processados são transmitidas ao cliente em streaming. Se uma resposta dessas pode ser armazenada, o proxy mantém uma cópia enquanto ela passa; um `Content-Length` declarado acima do tamanho máximo por objeto dispensa a cópia desde o início, e um corpo sem tamanho que ultrapasse esse limite tem a cópia descartada assim que isso acontece. A entrada é armazenada quando a origem termina o corpo, e uma resposta interrompida no meio nunca é armazenada.
+
 ## 10. Indicadores visíveis ao cliente
 
 | Cabeçalho | Valor | Significado |

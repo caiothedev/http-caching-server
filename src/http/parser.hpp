@@ -16,6 +16,8 @@ namespace proxy::http {
 
     enum class ParseStatus { NeedMore, Complete, Error };
 
+    enum class BodyFraming { None, Length, Chunked, UntilClose };
+
     enum class ParseError {
         None,
         BadStartLine,
@@ -53,6 +55,18 @@ namespace proxy::http {
         bool headers_complete() const { return headers_done_; }
         const Headers& headers() const { return headers_; }
         bool was_chunked() const { return chunked_; }
+        BodyFraming framing() const { return framing_; }
+
+        // Streaming mode: max_body_bytes does not apply, and the caller drains
+        // decoded body bytes with take_body() as they arrive instead of
+        // receiving the whole body at completion. Set before feeding.
+        void set_streaming(bool streaming) { streaming_ = streaming; }
+        // Moves out the decoded body bytes parsed so far.
+        std::string take_body() {
+            std::string out;
+            out.swap(body_);
+            return out;
+        }
 
     protected:
         enum class BodyMode { None, Fixed, Chunked, UntilClose };
@@ -108,6 +122,8 @@ namespace proxy::http {
         bool headers_done_ = false;
         bool chunked_ = false;
         bool saw_bytes_ = false;
+        bool streaming_ = false;
+        BodyFraming framing_ = BodyFraming::None;
     };
 
     class RequestParser : public ParserBase {
@@ -137,6 +153,7 @@ namespace proxy::http {
             : ParserBase(limits), request_method_(std::move(request_method)) {}
 
         Response take();
+        Response take_head();
         void reset(std::string request_method);
 
     private:

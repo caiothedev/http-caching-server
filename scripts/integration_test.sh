@@ -79,6 +79,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     time.sleep(0.5)
             except (BrokenPipeError, ConnectionResetError):
                 pass
+        elif self.path == "/slow-headers":
+            try:
+                self.wfile.write(b"HTTP/1.1 200 OK\r\nX-Slow: ")
+                for byte in b"abcdefghij":
+                    self.wfile.write(bytes([byte]))
+                    self.wfile.flush()
+                    time.sleep(0.5)
+                self.wfile.write(b"\r\nContent-Length: 0\r\n\r\n")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            self.close_connection = True
+        elif self.path == "/stall":
+            self.send_response(200)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "10")
+            self.end_headers()
+            try:
+                self.wfile.write(b"12345")
+                self.wfile.flush()
+                time.sleep(5)
+                self.wfile.write(b"67890")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        elif self.path.startswith("/big"):
+            size = 24 * 1024 * 1024
+            block = bytes(range(256)) * 4096
+            self.send_response(200)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(size))
+            self.end_headers()
+            sent = 0
+            while sent < size:
+                part = block[: size - sent]
+                self.wfile.write(part)
+                sent += len(part)
         else:
             self.send_body(404, b"not found")
     def do_POST(self):
@@ -235,7 +270,7 @@ kill "$NOCACHE_PROXY_PID" 2>/dev/null || true
 wait "$NOCACHE_PROXY_PID" 2>/dev/null || true
 NOCACHE_PROXY_PID=""
 
-echo "8. simultaneous client connections are capped"
+echo "8. connections beyond the cap are answered with 503"
 python3 - "$PROXY_PORT" <<'PY'
 import socket, sys, time
 port = int(sys.argv[1])
@@ -247,16 +282,46 @@ for _ in range(2):
     time.sleep(0.1)
 rejected = socket.create_connection(("127.0.0.1", port), timeout=2)
 rejected.settimeout(2)
-if rejected.recv(1) != b"":
-    raise RuntimeError("connection beyond --max-connections was not rejected")
+rejected.sendall(b"GET /__proxy/stats HTTP/1.1\r\nHost: proxy\r\n\r\n")
+response = b""
+while True:
+    chunk = rejected.recv(4096)
+    if not chunk:
+        break
+    response += chunk
+if not response.startswith(b"HTTP/1.1 503 ") or b"Retry-After: 1" not in response:
+    raise RuntimeError(f"connection beyond --max-connections was not rejected with 503: {response!r}")
 rejected.close()
 for client in clients:
     client.close()
 PY
 
-echo "9. upstream total timeout stops a slow-drip response"
-status="$(curl --noproxy '' -sS --max-time 8 -x "$PROXY" -o "$WORK_DIR/slow-drip.body" \
+echo "9. origin headers slower than --timeout give 504"
+status="$(curl --noproxy '' -sS --max-time 10 -x "$PROXY" -o /dev/null -w '%{http_code}' \
+    "$ORIGIN/slow-headers" || true)"
+[[ "$status" == "504" ]] || fail "slow-headers origin response returned $status instead of 504"
+
+echo "10. a streamed body that keeps making progress may outlast --timeout"
+status="$(curl --noproxy '' -sS --max-time 10 -x "$PROXY" -o "$WORK_DIR/slow-drip.body" \
     -w '%{http_code}' "$ORIGIN/slow-drip" || true)"
-[[ "$status" == "504" ]] || fail "slow-drip origin response returned $status instead of 504"
+[[ "$status" == "200" ]] || fail "slow-drip response returned $status instead of 200"
+[[ "$(cat "$WORK_DIR/slow-drip.body")" == "12345678" ]] || fail "slow-drip body was not relayed completely"
+
+echo "11. a body that stalls longer than --timeout is cut off"
+if curl --noproxy '' -sS --max-time 10 -x "$PROXY" -o "$WORK_DIR/stall.body" "$ORIGIN/stall" 2>/dev/null; then
+    fail "stalled body was reported as complete"
+fi
+[[ "$(cat "$WORK_DIR/stall.body")" == "12345" ]] || fail "unexpected bytes before the stall"
+
+echo "12. a response larger than --max-body streams through"
+pcurl -o "$WORK_DIR/big.body" "$ORIGIN/big" || fail "large response failed"
+[[ "$(stat -c %s "$WORK_DIR/big.body")" == "$((24 * 1024 * 1024))" ]] || fail "large response was truncated"
+python3 - "$WORK_DIR/big.body" <<'PY2'
+import sys
+data = open(sys.argv[1], "rb").read()
+block = bytes(range(256)) * 4096
+if any(data[i:i + len(block)] != block[: len(data) - i] for i in range(0, len(data), len(block))):
+    raise SystemExit("large response content changed in transit")
+PY2
 
 echo "integration test passed"

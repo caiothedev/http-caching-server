@@ -51,9 +51,11 @@ util/             strings, logger
 | | `cache_control.*` | `Cache-Control` directive parsing |
 | | `http_cache.*` | `HttpCache`: storability, freshness, age, revalidation, `Vary` |
 | `proxy` | `config.*` | `Config` and command-line parsing |
-| | `server.*` | `Server` (acceptor) and `ProxyContext` (shared state) |
+| | `access.*` | `AccessPolicy`: destination host allowlist and non-public address filtering |
+| | `server.*` | `Server` (acceptor, `503` for connections over the limit, accept backoff) and `ProxyContext` (shared state) |
 | | `session.*` | `Session`: lifecycle of one client connection |
-| | `upstream.*` | `UpstreamExchange`: one request/response exchange with the origin |
+| | `upstream.*` | `UpstreamExchange`: one streamed request/response exchange with the origin |
+| | `upstream_pool.*` | `UpstreamPool`: idle keep-alive connections to origins, shared by all sessions |
 | | `tunnel.*` | `Tunnel`: bidirectional byte relay for CONNECT |
 | | `deadline.hpp` | `Deadline`: inactivity watchdog on a `steady_timer` |
 
@@ -133,6 +135,7 @@ Step by step inside `Session`:
    - unsafe method (`POST`, `PUT`, `DELETE`, ...) with status `< 400` → invalidates the target URI and same-origin `Location`/`Content-Location` URIs.
 6. **Writing** (`send_response`): removes hop-by-hop headers, re-frames with `Content-Length` (the body is fully buffered and de-chunked), adds `Via`, `X-Cache` and `Connection`, logs the access line and writes.
 7. **Keep-alive**: if the client wants to keep the connection, `on_write` calls `process()` again, which may already have another request in `pending_`.
+8. **Watching the client while busy**: while the origin is answering (or a response is being written), the session keeps one read outstanding on the client socket. Bytes that arrive are only buffered (up to 64 KiB) for the next pipelined request; EOF or an error means the client left, so the upstream exchange is cancelled and counted in `client_aborts`. If a CONNECT follows a pipelined request while that read is still outstanding, `start_tunnel` cancels it and hands the socket to the `Tunnel` only after the read has completed, so no bytes are lost.
 
 ### CONNECT
 
@@ -225,7 +228,8 @@ Every timeout uses `Deadline`, a watchdog with a single `steady_timer` per owner
 - **Buffered responses.** The upstream response is read completely before it is sent to the client. This keeps caching and re-framing simple, at the cost of latency and memory for large responses (bounded by `ParserLimits::max_body_bytes`).
 - **No upstream connection pool.** Every request opens a new connection with `Connection: close`.
 - **Memory-only cache.** Contents are lost on restart.
-- **No authentication or ACLs.** That is why it listens on `127.0.0.1` by default.
+- **No client authentication or ACLs.** That is why it listens on `127.0.0.1` by default. Destinations can be restricted with `--allow-hosts` and `--block-private`.
+- **End-of-input from the client while a request is in progress is treated as an abort**, like Squid's default `half_closed_clients off`. Clients that half-close after sending a request do not get the response.
 - **No TLS interception.** HTTPS is only tunnelled, never cached.
 - **HTTP/1.x only.** No HTTP/2 or HTTP/3.
 

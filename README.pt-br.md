@@ -19,6 +19,9 @@ Um servidor proxy HTTP com sistema de cache desenvolvido em C++ como projeto de 
 
 - **GET / POST / PUT / DELETE / ...**: requisições em formato absoluto (`GET http://host/path HTTP/1.1`) são encaminhadas para a origem no formato de origem (*origin form*)
 - **CONNECT**: túnel TCP bidirecional (HTTPS) com fechamento parcial (*half-close*) e tempo limite de inatividade (*idle timeout*); as portas permitidas são configuráveis ​​(padrão: 443)
+- **Respostas em streaming com *backpressure***: o corpo é repassado ao cliente enquanto chega, um pedaço por escrita, então respostas de qualquer tamanho passam com memória limitada e os primeiros bytes chegam ao cliente na hora; corpos `chunked` ou delimitados pelo fechamento são reenquadrados como `chunked` para clientes HTTP/1.1
+- **Pool de conexões keep-alive com as origens**: conexões ociosas são reaproveitadas (`--pool-size`, `--pool-idle-timeout`); só requisições idempotentes usam uma conexão do pool, e são repetidas uma vez numa conexão nova se a origem a fechou nesse meio-tempo
+- **Hits do cache sem cópia**: o corpo é escrito direto da entrada do cache com I/O *scatter/gather*
 - **Analisador (*parser*) HTTP/1.1 incremental implementado manualmente**: suporta `Content-Length`, codificação por blocos (*chunked encoding*), corpos lidos até o fechamento da conexão, respostas intermediárias (1xx), *pipelining*, validação rigorosa de CRLF/cabeçalhos e limites de tamanho
 - O suporte a codificações de transferência (*transfer coding*) é intencionalmente limitado apenas ao tipo `chunked`; combinações de `Transfer-Encoding` não suportadas ou ambíguas são rejeitadas
 - O cabeçalho `Expect` suporta apenas o valor `100-continue`; outras expectativas resultam em um erro `417 Expectation Failed`
@@ -32,7 +35,10 @@ Um servidor proxy HTTP com sistema de cache desenvolvido em C++ como projeto de 
   - Suporte a `Vary`; invalidação após POST/PUT/DELETE bem-sucedidos
   - Header `X-Cache: HIT | MISS | REVALIDATED` nas respostas
 - Keep-alive com o cliente, `Expect: 100-continue`, remoção de headers *hop-by-hop*, `Via`, detecção de loop
-- Limites de conexões simultâneas de clientes (incluindo túneis CONNECT) e de tamanho por corpo, com orçamento agregado de 128 MiB para corpos em trânsito
+- Limites de conexões simultâneas de clientes (incluindo túneis CONNECT) e de tamanho por corpo, com orçamento agregado de 128 MiB para corpos em trânsito; clientes acima do limite recebem `503 Service Unavailable` com `Retry-After`
+- Política de acesso a destinos: lista de hosts permitidos (`--allow-hosts`, com curingas `*.example.com`) e recusa opcional de endereços de loopback/privados/link-local após a resolução DNS (`--block-private`), tanto no encaminhamento quanto no CONNECT
+- Um cliente que desconecta enquanto a origem ainda responde cancela a troca com a origem
+- Erros de `accept` como `EMFILE` são repetidos com *backoff* exponencial em vez de entrar em loop
 - Prazos separados de duração total e de inatividade para trocas com a origem, além de timeouts de cliente ocioso e de túnel
 - Encerramento gracioso via SIGINT/SIGTERM: interromper o aceite de novos clientes, concluir respostas HTTP em andamento e fechar túneis CONNECT ativos
 - Endpoint de estatísticas: `GET /__proxy/stats` (JSON)
@@ -78,7 +84,7 @@ curl -x http://127.0.0.1:8080 https://example.com/
 curl http://127.0.0.1:8080/__proxy/stats
 ```
 
-Execute `./build/http_proxy --help` para ver todas as opções. Por padrão o proxy escuta só em `127.0.0.1`. Use `--listen 0.0.0.0` com cuidado: um proxy aberto pode ser usado por qualquer pessoa da rede.
+Execute `./build/http_proxy --help` para ver todas as opções. Por padrão o proxy escuta só em `127.0.0.1`. Use `--listen 0.0.0.0` com cuidado: um proxy aberto pode ser usado por qualquer pessoa da rede. Ao expô-lo, combine `--allow-hosts` e/ou `--block-private` com regras de firewall.
 
 ## Arquitetura
 
@@ -94,10 +100,10 @@ src/
     ├── upstream          # uma troca request/response com a origem
     ├── tunnel            # relay de bytes do CONNECT
     └── deadline.hpp      # watchdog de timeout baseado em steady_timer
-tests/                    # testes Catch2 do parser, URL, datas, LRU e política de cache
+tests/                    # testes unitários Catch2 e testes de integração do proxy no mesmo processo
 ```
 
-Fluxo de uma requisição: `Session` lê e faz o parse → consulta o `HttpCache` → *hit*: responde direto; *stale*: envia uma requisição condicional; *miss*: `UpstreamExchange` conecta na origem → a resposta é armazenada se a política permitir → é reenquadrada com `Content-Length` e enviada ao cliente.
+Fluxo de uma requisição: `Session` lê e faz o parse → consulta o `HttpCache` → *hit*: responde direto; *stale*: envia uma requisição condicional; *miss*: `UpstreamExchange` pega uma conexão do pool ou conecta na origem → os headers e os primeiros bytes do corpo vão para o cliente na hora e o resto é repassado pedaço a pedaço (uma cópia é mantida para o cache enquanto couber em `--max-object`) → a resposta é armazenada se a política permitir.
 
 O `HttpCache` é compartilhado entre threads e protegido por mutex. Todo o resto do estado pertence a uma única sessão, cujos handlers rodam serializados no strand dela.
 

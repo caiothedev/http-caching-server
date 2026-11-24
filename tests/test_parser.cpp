@@ -342,3 +342,70 @@ TEST_CASE("keep-alive defaults depend on the HTTP version", "[message]") {
     r10.headers.add("Proxy-Connection", "Keep-Alive");
     CHECK(wants_keep_alive(r10));
 }
+
+TEST_CASE("streaming mode hands out decoded body bytes as they arrive", "[parser]") {
+    ParserLimits limits;
+    limits.max_body_bytes = 4;  // ignored in streaming mode
+    ResponseParser p("GET", limits);
+    p.set_streaming(true);
+
+    p.feed("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel");
+    REQUIRE(p.headers_complete());
+    CHECK(p.framing() == BodyFraming::Chunked);
+    auto head = p.take_head();
+    CHECK(head.status == 200);
+    CHECK(head.headers.contains("Transfer-Encoding"));
+    CHECK(head.body.empty());
+    CHECK(p.take_body() == "hel");
+
+    p.feed("lo\r\n6\r\n world\r\n");
+    CHECK(p.status() == ParseStatus::NeedMore);
+    CHECK(p.take_body() == "lo world");
+    CHECK(p.take_body().empty());
+
+    p.feed("0\r\n\r\n");
+    CHECK(p.status() == ParseStatus::Complete);
+    CHECK(p.take_body().empty());
+}
+
+TEST_CASE("streaming mode ignores the body limit for every framing", "[parser]") {
+    ParserLimits limits;
+    limits.max_body_bytes = 4;
+
+    ResponseParser fixed("GET", limits);
+    fixed.set_streaming(true);
+    fixed.feed("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n0123456789");
+    CHECK(fixed.status() == ParseStatus::Complete);
+    CHECK(fixed.framing() == BodyFraming::Length);
+    CHECK(fixed.take_body() == "0123456789");
+
+    ResponseParser until_close("GET", limits);
+    until_close.set_streaming(true);
+    until_close.feed("HTTP/1.1 200 OK\r\n\r\nabcdefgh");
+    CHECK(until_close.framing() == BodyFraming::UntilClose);
+    CHECK(until_close.take_body() == "abcdefgh");
+    until_close.feed("ij");
+    until_close.finish();
+    CHECK(until_close.status() == ParseStatus::Complete);
+    CHECK(until_close.take_body() == "ij");
+
+    ResponseParser buffered("GET", limits);
+    buffered.feed("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n");
+    CHECK(buffered.status() == ParseStatus::Error);
+    CHECK(buffered.error() == ParseError::BodyTooLarge);
+}
+
+TEST_CASE("framing is reported for bodiless responses", "[parser]") {
+    ResponseParser head("HEAD");
+    head.feed("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n");
+    CHECK(head.status() == ParseStatus::Complete);
+    CHECK(head.framing() == BodyFraming::None);
+}
+
+TEST_CASE("serialize_head omits the body", "[message]") {
+    Response resp;
+    resp.status = 200;
+    resp.headers.add("Content-Length", "3");
+    resp.body = "abc";
+    CHECK(serialize_head(resp) == "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n");
+}

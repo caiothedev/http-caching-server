@@ -232,10 +232,12 @@ namespace proxy::http {
 
         switch (spec.mode) {
             case BodyMode::None:
+                framing_ = BodyFraming::None;
                 complete();
                 return;
             case BodyMode::Fixed:
-                if (spec.length > limits_.max_body_bytes) {
+                framing_ = BodyFraming::Length;
+                if (!streaming_ && spec.length > limits_.max_body_bytes) {
                     fail(ParseError::BodyTooLarge, "body exceeds limit");
                     return;
                 }
@@ -247,10 +249,12 @@ namespace proxy::http {
                 state_ = State::FixedBody;
                 return;
             case BodyMode::Chunked:
+                framing_ = BodyFraming::Chunked;
                 chunked_ = true;
                 state_ = State::ChunkSize;
                 return;
             case BodyMode::UntilClose:
+                framing_ = BodyFraming::UntilClose;
                 state_ = State::UntilClose;
                 return;
         }
@@ -269,7 +273,7 @@ namespace proxy::http {
             state_ = State::Trailer;
             return;
         }
-        if (size > limits_.max_body_bytes || body_.size() + size > limits_.max_body_bytes) {
+        if (!streaming_ && (size > limits_.max_body_bytes || body_.size() + size > limits_.max_body_bytes)) {
             fail(ParseError::BodyTooLarge, "body exceeds limit");
             return;
         }
@@ -278,7 +282,7 @@ namespace proxy::http {
     }
 
     bool ParserBase::append_body(std::string_view data) {
-        if (body_.size() + data.size() > limits_.max_body_bytes) {
+        if (!streaming_ && body_.size() + data.size() > limits_.max_body_bytes) {
             fail(ParseError::BodyTooLarge, "body exceeds limit");
             return false;
         }
@@ -311,6 +315,7 @@ namespace proxy::http {
         headers_done_ = false;
         chunked_ = false;
         saw_bytes_ = false;
+        framing_ = BodyFraming::None;
     }
 
     bool ParserBase::body_from_headers(BodySpec& spec, bool is_request) {
@@ -508,6 +513,16 @@ namespace proxy::http {
         resp.reason = std::move(reason_);
         resp.headers = std::move(headers_);
         resp.body = std::move(body_);
+        return resp;
+    }
+
+    Response ResponseParser::take_head() {
+        Response resp;
+        resp.version = version_;
+        resp.status = status_code_;
+        resp.reason = reason_;
+        resp.headers = std::move(headers_);
+        headers_.clear();
         return resp;
     }
 

@@ -111,6 +111,8 @@ The LRU tracks estimated bytes, including the body, response reason, header name
 
 The maximum object size is clamped to the total cache capacity during configuration.
 
+Responses that are still arriving when their headers are processed are streamed to the client. If such a response may be stored, the proxy keeps a copy while it streams; a declared `Content-Length` above the maximum object size skips the copy from the start, and a body without a length that grows past it is dropped from the copy as soon as it does. The entry is stored when the origin finishes the body, and a response cut off mid-body is never stored.
+
 ## 10. Client-visible indicators
 
 | Header | Value | Meaning |

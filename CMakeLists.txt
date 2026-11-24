@@ -29,8 +29,10 @@ add_library(proxy_core
     src/http/date.cpp
     src/cache/cache_control.cpp
     src/cache/http_cache.cpp
+    src/proxy/access.cpp
     src/proxy/config.cpp
     src/proxy/upstream.cpp
+    src/proxy/upstream_pool.cpp
     src/proxy/tunnel.cpp
     src/proxy/session.cpp
     src/proxy/server.cpp
@@ -71,11 +73,14 @@ if(PROXY_BUILD_TESTS)
         tests/test_cache_control.cpp
         tests/test_http_cache.cpp
         tests/test_config.cpp
+        tests/test_access.cpp
+        tests/test_proxy.cpp
+        tests/test_upstream_pool.cpp
     )
     target_link_libraries(proxy_tests PRIVATE proxy_core Catch2::Catch2WithMain)
 
     enable_testing()
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
-    catch_discover_tests(proxy_tests)
+    catch_discover_tests(proxy_tests PROPERTIES TIMEOUT 60)
 endif()

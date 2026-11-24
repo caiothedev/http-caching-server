@@ -119,3 +119,44 @@ TEST_CASE("help exits successfully without producing a config", "[config]") {
     CHECK(result.exit_code == 0);
     CHECK(result.message.find("Usage: http_proxy") != std::string::npos);
 }
+
+TEST_CASE("access policy options are parsed", "[config]") {
+    auto defaults = parse({"http_proxy"});
+    REQUIRE(defaults.config);
+    CHECK(defaults.config->access.allowed_hosts.empty());
+    CHECK_FALSE(defaults.config->access.block_private);
+
+    auto result = parse({"http_proxy", "--allow-hosts", "Example.com, *.cdn.test", "--block-private"});
+    REQUIRE(result.config);
+    CHECK((result.config->access.allowed_hosts == std::vector<std::string>{"example.com", "*.cdn.test"}));
+    CHECK(result.config->access.block_private);
+
+    auto inline_value = parse({"http_proxy", "--allow-hosts=api.test"});
+    REQUIRE(inline_value.config);
+    CHECK((inline_value.config->access.allowed_hosts == std::vector<std::string>{"api.test"}));
+}
+
+TEST_CASE("invalid access policy options are rejected", "[config]") {
+    for (auto value : {"", ",", "bad host", "*", "ex*ample.com"}) {
+        INFO(value);
+        auto result = parse({"http_proxy", "--allow-hosts", value});
+        CHECK_FALSE(result.config);
+        CHECK(result.exit_code == 2);
+    }
+    CHECK_FALSE(parse({"http_proxy", "--allow-hosts"}).config);
+}
+
+TEST_CASE("upstream pool options are parsed", "[config]") {
+    auto defaults = parse({"http_proxy"});
+    REQUIRE(defaults.config);
+    CHECK(defaults.config->pool_size == 32);
+    CHECK(defaults.config->pool_idle_timeout == std::chrono::seconds{15});
+
+    auto result = parse({"http_proxy", "--pool-size", "0", "--pool-idle-timeout=5"});
+    REQUIRE(result.config);
+    CHECK(result.config->pool_size == 0);
+    CHECK(result.config->pool_idle_timeout == std::chrono::seconds{5});
+
+    CHECK_FALSE(parse({"http_proxy", "--pool-size", "1025"}).config);
+    CHECK_FALSE(parse({"http_proxy", "--pool-idle-timeout", "0"}).config);
+}

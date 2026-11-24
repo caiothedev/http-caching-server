@@ -46,6 +46,8 @@ Opções que recebem um valor aceitam as duas formas:
 | `--idle-timeout SEC` | `60` | 1–3600 segundos | Timeout de inatividade da conexão keep-alive do cliente. |
 | `--tunnel-timeout SEC` | `300` | 1–86400 segundos | Timeout de inatividade do túnel CONNECT. |
 | `--connect-ports LIST` | `443` | Portas de 1–65535 separadas por vírgula, ou `any` | Portas de destino permitidas para CONNECT. |
+| `--allow-hosts LIST` | qualquer host | Nomes de host, IPs literais ou curingas `*.dominio` separados por vírgula | Hosts de destino que podem ser contatados, no encaminhamento e no CONNECT. Os demais recebem `403`. |
+| `--block-private` | desativado | flag | Recusa destinos cujos endereços resolvidos são todos de loopback, privados, link-local, CGNAT, multicast ou não públicos de outra forma (`403`). |
 | `--log-level LEVEL` | `info` | `debug`, `info`, `warn`, `error` | Severidade mínima dos logs. |
 | `-h, --help` | — | flag | Exibe as informações de uso e encerra o programa. |
 
@@ -65,7 +67,7 @@ Os padrões do parser HTTP são:
 - Quantidade máxima de campos de cabeçalho: 100.
 - Tamanho máximo do corpo da mensagem: 8 MiB.
 
-Por padrão, o servidor admite até 16 conexões simultâneas de clientes, incluindo túneis CONNECT. `--max-connections` e `--max-body` são validados em conjunto para que o produto não exceda 128 MiB de capacidade configurada para corpos em trânsito. Valores fixos de `Content-Length` são verificados sem reservar antecipadamente todo o corpo declarado antes da chegada do payload.
+Por padrão, o servidor admite até 16 conexões simultâneas de clientes, incluindo túneis CONNECT. Uma conexão acima do limite recebe `503 Service Unavailable` com `Retry-After: 1` e é fechada. `--max-connections` e `--max-body` são validados em conjunto para que o produto não exceda 128 MiB de capacidade configurada para corpos em trânsito. Valores fixos de `Content-Length` são verificados sem reservar antecipadamente todo o corpo declarado antes da chegada do payload.
 
 O limite efetivo do corpo é aumentado quando o tamanho máximo configurado para uma entrada do cache é maior que o limite padrão do parser. O tamanho máximo por entrada também é limitado à capacidade total do cache quando for maior que ela.
 
@@ -85,7 +87,19 @@ Para permitir qualquer porta de destino:
 ./build/http_proxy --connect-ports any
 ```
 
-Uma lista de portas vazia é interpretada internamente como permissão para qualquer porta. A configuração `any` não é recomendada para um proxy exposto. Esta opção restringe somente as portas; ela não fornece uma lista de hosts ou endereços IP de destino permitidos.
+Uma lista de portas vazia é interpretada internamente como permissão para qualquer porta. A configuração `any` não é recomendada para um proxy exposto. Esta opção restringe somente as portas; use `--allow-hosts` e `--block-private` (abaixo) para restringir hosts e endereços de destino.
+
+### Política de acesso a destinos
+
+`--allow-hosts` restringe quais hosts de destino podem ser alcançados, tanto em requisições encaminhadas quanto no CONNECT. As entradas são comparadas sem diferenciar maiúsculas de minúsculas com o host da requisição; `example.com` corresponde só a esse host e `*.example.com` corresponde a qualquer subdomínio (mas não ao próprio `example.com`, então liste os dois quando necessário). IPs literais também podem ser listados (`127.0.0.1`, `::1` ou `[::1]`).
+
+```bash
+./build/http_proxy --allow-hosts 'example.com,*.example.com'
+```
+
+`--block-private` recusa destinos que resolvem para endereços não públicos: loopback (`127.0.0.0/8`, `::1`), privados (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`), link-local (`169.254/16`, incluindo endpoints de metadados de nuvem, e `fe80::/10`), CGNAT (`100.64/10`), não especificados, multicast, de documentação e outras faixas reservadas. Endereços IPv4 embutidos em IPv6 (`::ffff:a.b.c.d`, NAT64, 6to4) são avaliados como IPv4. A verificação é feita sobre os endereços retornados pelo DNS, e o proxy só conecta nos endereços aprovados, então um nome público que resolve para um endereço interno também é recusado. Se todos os endereços de um destino forem recusados, o cliente recebe `403`.
+
+As duas opções vêm desligadas por padrão para que o proxy continue funcionando em desenvolvimento local. Ative-as sempre que o listener puder ser alcançado por clientes em quem você não confia plenamente.
 
 ## 5. Configuração do cache
 

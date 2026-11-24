@@ -51,9 +51,11 @@ util/             strings, logger
 | | `cache_control.*` | parsing das diretivas `Cache-Control` |
 | | `http_cache.*` | `HttpCache`: decide o que armazenar, frescor, idade, revalidação, `Vary` |
 | `proxy` | `config.*` | `Config` e parsing da linha de comando |
-| | `server.*` | `Server` (acceptor) e `ProxyContext` (estado compartilhado) |
+| | `access.*` | `AccessPolicy`: lista de hosts de destino permitidos e filtro de endereços não públicos |
+| | `server.*` | `Server` (acceptor, `503` para conexões acima do limite, *backoff* no accept) e `ProxyContext` (estado compartilhado) |
 | | `session.*` | `Session`: ciclo de vida de uma conexão de cliente |
-| | `upstream.*` | `UpstreamExchange`: uma troca requisição/resposta com a origem |
+| | `upstream.*` | `UpstreamExchange`: uma troca requisição/resposta com a origem, em streaming |
+| | `upstream_pool.*` | `UpstreamPool`: conexões keep-alive ociosas com as origens, compartilhadas por todas as sessões |
 | | `tunnel.*` | `Tunnel`: relay bidirecional de bytes para CONNECT |
 | | `deadline.hpp` | `Deadline`: watchdog de inatividade sobre um `steady_timer` |
 
@@ -133,6 +135,7 @@ Passo a passo em `Session`:
    - método inseguro (`POST`, `PUT`, `DELETE`, ...) com status `< 400` → invalida a URI alvo e as URIs de `Location`/`Content-Location` da mesma origem.
 6. **Escrita** (`send_response`): remove headers *hop-by-hop*, refaz o framing com `Content-Length` (o corpo já está todo em memória e decodificado), adiciona `Via`, `X-Cache` e `Connection`, registra a linha de log e escreve.
 7. **Keep-alive**: se o cliente quer manter a conexão, `on_write` volta a `process()`, que pode já ter outra requisição em `pending_`.
+8. **Vigiando o cliente enquanto ocupada**: enquanto a origem responde (ou uma resposta está sendo escrita), a sessão mantém uma leitura pendente no socket do cliente. Os bytes que chegam são apenas guardados (até 64 KiB) para a próxima requisição em *pipelining*; EOF ou erro significam que o cliente foi embora, então a troca com a origem é cancelada e contada em `client_aborts`. Se um CONNECT vier depois de uma requisição em *pipelining* com essa leitura ainda pendente, `start_tunnel` a cancela e só entrega o socket ao `Tunnel` depois que a leitura termina, sem perder bytes.
 
 ### CONNECT
 
@@ -225,7 +228,8 @@ Todos os timeouts usam `Deadline`, um watchdog com um único `steady_timer` por 
 - **Respostas em buffer.** A resposta da origem é lida inteira antes de ser enviada ao cliente. Isso simplifica o cache e o reframing, mas aumenta a latência e o uso de memória para respostas grandes (limitadas por `ParserLimits::max_body_bytes`).
 - **Sem pool de conexões com a origem.** Cada requisição abre uma conexão nova com `Connection: close`.
 - **Cache só em memória.** O conteúdo é perdido ao reiniciar.
-- **Sem autenticação nem ACL.** Por isso o padrão é escutar em `127.0.0.1`.
+- **Sem autenticação de clientes nem ACL.** Por isso o padrão é escutar em `127.0.0.1`. Os destinos podem ser restringidos com `--allow-hosts` e `--block-private`.
+- **Fim de entrada do cliente durante uma requisição é tratado como desistência**, como no padrão `half_closed_clients off` do Squid. Clientes que fazem *half-close* depois de enviar a requisição não recebem a resposta.
 - **Sem interceptação TLS.** HTTPS só passa por túnel, sem cache.
 - **Apenas HTTP/1.x.** Não há suporte a HTTP/2 ou HTTP/3.
 
